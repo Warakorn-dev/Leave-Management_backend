@@ -1,0 +1,257 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model LeaveAttachment {
+  id             String       @id @default(uuid())
+  leaveRequestId String
+  filePath       String       @db.LongText
+  fileType       String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  leaveRequest   LeaveRequest @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade)
+
+  @@index([leaveRequestId], map: "attachment_leaveRequestId_fkey")
+  @@map("attachment")
+}
+
+model HrSetting {
+  id         Int      @id @default(autoincrement())
+  leaveQuota Int      @default(1)
+  updatedAt  DateTime @default(now()) @db.DateTime(6)
+
+  @@map("hr_setting")
+}
+
+model Announcement {
+  id             String   @id @default(uuid())
+  title          String
+  subtitle       String
+  isImportant    Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  attachmentData String?  @db.LongText
+  attachmentName String?
+
+  @@map("announcement")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  details   String?  @db.Text
+  ipAddress String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User?    @relation(fields: [userId], references: [id], map: "AuditLog_userId_fkey")
+
+  @@index([userId], map: "AuditLog_userId_fkey")
+  @@map("auditlog")
+}
+
+model Captcha {
+  id          String   @id @default(uuid())
+  captchaCode String
+  isUsed      Boolean  @default(false)
+  expiredAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@map("captcha")
+}
+
+model Department {
+  id        String     @id @default(uuid())
+  code      String?
+  name      String     @unique(map: "Department_name_key")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  employee  Employee[]
+  position  Position[]
+
+  @@map("department")
+}
+
+model Employee {
+  id             String         @id @default(uuid())
+  userId         String         @unique(map: "Employee_userId_key")
+  employeeCode   String?        @unique(map: "Employee_employeeCode_key")
+  title          String?
+  firstName      String
+  lastName       String
+  gender         String?        @default("Unspecified")
+  phone          String?
+  departmentId   String
+  positionId     String
+  hireDate       DateTime
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  currentAddress String?        @db.Text
+  dateOfBirth    DateTime?
+  idCardAddress  String?        @db.Text
+  idCardNumber   String?
+  firstNameEN    String?
+  lastNameEN     String?
+  department     Department     @relation(fields: [departmentId], references: [id], map: "Employee_departmentId_fkey")
+  position       Position       @relation(fields: [positionId], references: [id], map: "Employee_positionId_fkey")
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade, map: "Employee_userId_fkey")
+  leaveBalances  LeaveBalance[]
+  leaveRequests  LeaveRequest[]
+
+  @@index([departmentId], map: "Employee_departmentId_fkey")
+  @@index([positionId], map: "Employee_positionId_fkey")
+  @@map("employee")
+}
+
+model LeaveApproval {
+  id             String       @id @default(uuid())
+  leaveRequestId String
+  approverId     String
+  status         String
+  comment        String?      @db.Text
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation(fields: [approverId], references: [id], onDelete: Cascade, map: "LeaveApproval_approverId_fkey")
+  leaveRequest   LeaveRequest @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade, map: "LeaveApproval_leaveRequestId_fkey")
+
+  @@index([approverId], map: "LeaveApproval_approverId_fkey")
+  @@index([leaveRequestId], map: "LeaveApproval_leaveRequestId_fkey")
+  @@map("leaveapproval")
+}
+
+model LeaveBalance {
+  id            String    @id @default(uuid())
+  employeeId    String
+  leaveTypeId   String
+  year          Int
+  totalDays     Float
+  usedDays      Float     @default(0)
+  remainingDays Float
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade, map: "LeaveBalance_employeeId_fkey")
+  leaveType     LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade, map: "LeaveBalance_leaveTypeId_fkey")
+
+  @@unique([employeeId, leaveTypeId, year], map: "LeaveBalance_employeeId_leaveTypeId_year_key")
+  @@index([leaveTypeId], map: "LeaveBalance_leaveTypeId_fkey")
+  @@map("leavebalance")
+}
+
+model LeaveRequest {
+  id            String            @id @default(uuid())
+  employeeId    String
+  leaveTypeId   String
+  startDate     DateTime
+  endDate       DateTime
+  startFormat   String            @default("full")
+  endFormat     String            @default("full")
+  totalDays     Float
+  paidDays      Float             @default(0)
+  unpaidDays    Float             @default(0)
+  reason        String            @db.Text
+  status        String            @default("Pending")
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  attachments   LeaveAttachment[]
+  approvals     LeaveApproval[]
+  employee      Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade, map: "LeaveRequest_employeeId_fkey")
+  leaveType     LeaveType         @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade, map: "LeaveRequest_leaveTypeId_fkey")
+
+  @@index([employeeId], map: "LeaveRequest_employeeId_fkey")
+  @@index([leaveTypeId], map: "LeaveRequest_leaveTypeId_fkey")
+  @@map("leaverequest")
+}
+
+model LeaveType {
+  id                  String         @id @default(uuid())
+  name                String         @unique(map: "LeaveType_name_key")
+  defaultDays         Float
+  requiresCertificate Boolean        @default(false)
+  isSpecial           Boolean        @default(false)
+  advanceNoticeDays   Int            @default(0)
+  minTenureDays       Int            @default(0)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  leaveBalances       LeaveBalance[]
+  leaveRequests       LeaveRequest[]
+
+  @@map("leavetype")
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String
+  message     String   @db.Text
+  isRead      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  redirectUrl String?  @db.Text
+  type        String?  @default("SYSTEM")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "Notification_userId_fkey")
+
+  @@index([userId], map: "Notification_userId_fkey")
+  @@map("notification")
+}
+
+model Position {
+  id           String      @id @default(uuid())
+  code         String?
+  name         String
+  departmentId String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  employee     Employee[]
+  department   Department? @relation(fields: [departmentId], references: [id], map: "Position_departmentId_fkey")
+
+  @@index([departmentId], map: "Position_departmentId_fkey")
+  @@map("position")
+}
+
+model PublicHoliday {
+  id        String   @id @default(uuid())
+  name      String
+  date      DateTime @unique(map: "PublicHoliday_date_key")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("publicholiday")
+}
+
+model Role {
+  id        String   @id @default(uuid())
+  name      String   @unique(map: "Role_name_key")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User[]
+
+  @@map("role")
+}
+
+model User {
+  id            String          @id @default(uuid())
+  email         String          @unique(map: "User_email_key")
+  username      String?         @unique(map: "User_username_key")
+  passwordHash  String
+  refreshToken  String?         @db.Text
+  avatarUrl     String?         @db.LongText
+  roleId        String
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  isActive      Boolean         @default(true)
+  auditLog      AuditLog[]
+  employee      Employee?
+  leaveApproval LeaveApproval[]
+  notification  Notification[]
+  role          Role            @relation(fields: [roleId], references: [id], map: "User_roleId_fkey")
+
+  @@index([roleId], map: "User_roleId_fkey")
+  @@map("user")
+}
