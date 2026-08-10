@@ -134,6 +134,12 @@ export class HrService {
           departmentId: dto.departmentId,
           positionId: dto.positionId,
           hireDate: dto.hireDate ? new Date(dto.hireDate) : new Date(),
+          firstNameEN: dto.firstNameEN || null,
+          lastNameEN: dto.lastNameEN || null,
+          idCardNumber: dto.idCardNumber || null,
+          dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
+          idCardAddress: dto.idCardAddress || null,
+          currentAddress: dto.currentAddress || null,
         },
       });
 
@@ -193,6 +199,12 @@ export class HrService {
           departmentId: dto.departmentId !== undefined ? dto.departmentId : undefined,
           positionId: dto.positionId !== undefined ? dto.positionId : undefined,
           hireDate: dto.hireDate ? new Date(dto.hireDate) : undefined,
+          firstNameEN: dto.firstNameEN !== undefined ? dto.firstNameEN : undefined,
+          lastNameEN: dto.lastNameEN !== undefined ? dto.lastNameEN : undefined,
+          idCardNumber: dto.idCardNumber !== undefined ? dto.idCardNumber : undefined,
+          dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
+          idCardAddress: dto.idCardAddress !== undefined ? dto.idCardAddress : undefined,
+          currentAddress: dto.currentAddress !== undefined ? dto.currentAddress : undefined,
         }
       });
     });
@@ -550,7 +562,7 @@ export class HrService {
     return {
       success: true,
       data: {
-        leaveTypes: leaveTypes.map(lt => ({ id: lt.id, name: lt.name })),
+        leaveTypes: leaveTypes.map(lt => ({ id: lt.id, name: lt.name, defaultDays: lt.defaultDays })),
         summary
       }
     };

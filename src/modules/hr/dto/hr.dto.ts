@@ -150,6 +150,36 @@ export class CreateEmployeeDto {
   @ApiPropertyOptional()
   @IsString()
   @IsOptional()
+  firstNameEN?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  lastNameEN?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  idCardNumber?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  dateOfBirth?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  idCardAddress?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  currentAddress?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
   phone?: string;
 
   @ApiProperty()
@@ -223,6 +253,36 @@ export class UpdateEmployeeDto {
   @IsString()
   @IsOptional()
   lastName?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  firstNameEN?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  lastNameEN?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  idCardNumber?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  dateOfBirth?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  idCardAddress?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  currentAddress?: string;
 
   @ApiPropertyOptional()
   @IsString()
