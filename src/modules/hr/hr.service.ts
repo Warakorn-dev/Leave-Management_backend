@@ -24,6 +24,8 @@ export class HrService {
     return this.prisma.department.delete({ where: { id } });
   }
 
+
+
   // --- Roles ---
   async findAllRoles() {
     const roles = await this.prisma.role.findMany({
