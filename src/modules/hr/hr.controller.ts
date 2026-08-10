@@ -57,6 +57,13 @@ export class HrController {
     return this.hrService.deleteDepartment(id);
   }
 
+  // --- Roles ---
+  @Get('roles')
+  @ApiOperation({ summary: 'Get all roles' })
+  findAllRoles() {
+    return this.hrService.findAllRoles();
+  }
+
   // --- Positions ---
   @Post('positions')
   @ApiOperation({ summary: 'Create a new position' })
