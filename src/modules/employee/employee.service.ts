@@ -254,7 +254,7 @@ export class EmployeeService {
         paidDays: paidDays,
         unpaidDays: unpaidDays,
         reason: dto.reason,
-        status: ['Manager', 'HR'].includes(employee.user?.role?.name) ? 'Waiting CEO' : 'Pending',
+        status: ['Manager', 'HR'].includes(employee.user?.role?.name) ? 'PENDING_EXECUTIVE' : 'PENDING_VERIFY',
       }
     });
 
@@ -283,32 +283,32 @@ export class EmployeeService {
         leaveTimeDetail = `วันที่ ${startDateStr} - ${endDateStr}`;
       }
 
-      if (leaveRequest.status === 'Pending') {
-        const managers = await this.prisma.employee.findMany({
-          where: { departmentId: employee.departmentId, user: { role: { name: 'Manager' } } },
+      if (leaveRequest.status === 'PENDING_VERIFY') {
+        const hrs = await this.prisma.employee.findMany({
+          where: { user: { role: { name: 'HR' } } },
           include: { user: true }
         });
-        for (const m of managers) {
-          if (m.user?.id) {
+        for (const hr of hrs) {
+          if (hr.user?.id) {
             await this.prisma.notification.create({
               data: {
-                userId: m.user.id,
-                title: 'มีคำขอลาใหม่ในแผนก',
+                userId: hr.user.id,
+                title: 'มีคำขอลาใหม่รอตรวจสอบ',
                 message: `พนักงาน "${employee.firstName} ${employee.lastName}" ได้ยื่นคำขอ ${leaveTypeName} (${durationText}) ${leaveTimeDetail}`,
                 type: 'NEW_ORDER',
-                redirectUrl: '/dashboard/manager/approve',
+                redirectUrl: '/dashboard/hr/approval',
               }
             });
           }
-          if (m.user?.email) {
+          if (hr.user?.email) {
             this.notificationService.sendEmail(
-              m.user.email,
+              hr.user.email,
               `[Leave Request] ${employee.firstName} ${employee.lastName} ได้ยื่นคำขอลางาน`,
-              `เรียน ${m.firstName},\n\n${employee.firstName} ${employee.lastName} ได้ยื่นคำขอ${leaveTypeName} (${durationText}) ${leaveTimeDetail}\nเหตุผล: ${dto.reason}\n\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบและอนุมัติ`
+              `เรียน ${hr.firstName},\n\n${employee.firstName} ${employee.lastName} ได้ยื่นคำขอ${leaveTypeName} (${durationText}) ${leaveTimeDetail}\nเหตุผล: ${dto.reason}\n\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบ`
             );
           }
         }
-      } else if (leaveRequest.status === 'Waiting CEO') {
+      } else if (leaveRequest.status === 'PENDING_EXECUTIVE') {
         const ceos = await this.prisma.user.findMany({
           where: { role: { name: 'CEO' } }
         });
@@ -352,11 +352,15 @@ export class EmployeeService {
       throw new ForbiddenException('You do not have permission to update this leave request');
     }
     
-    if (request.status !== 'Pending' && request.status !== 'Waiting CEO') {
-      throw new ForbiddenException('Can only update pending leave requests');
+    const allowedStatuses = ['PENDING_VERIFY', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE', 'REJECTED', 'Pending', 'Waiting CEO', 'Rejected'];
+    if (!allowedStatuses.includes(request.status)) {
+      throw new ForbiddenException('Can only update pending or rejected leave requests');
     }
 
     const dataToUpdate: any = { ...dto };
+    if (request.status.toUpperCase() === 'REJECTED') {
+      dataToUpdate.status = ['Manager', 'HR'].includes(employee.user?.role?.name) ? 'PENDING_EXECUTIVE' : 'PENDING_VERIFY';
+    }
     
     let newStartDate: Date;
     let newEndDate: Date;
@@ -468,7 +472,7 @@ export class EmployeeService {
         where: {
           employeeId: employee.id,
           leaveTypeId: request.leaveTypeId,
-          status: { in: ['Pending', 'Waiting CEO'] },
+          status: { in: ['PENDING_VERIFY', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'] },
           startDate: { gte: new Date(`${currentYear}-01-01T00:00:00.000Z`) },
           id: { not: requestId }
         },
@@ -585,11 +589,11 @@ export class EmployeeService {
       throw new NotFoundException('Leave request not found');
     }
     
-    if (request.status.includes('Rejected')) {
+    if (request.status.toUpperCase() === 'REJECTED') {
       throw new ForbiddenException('Cannot delete a rejected leave request');
     }
 
-    if (request.status.includes('Approved')) {
+    if (request.status === 'APPROVED') {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const startDay = new Date(request.startDate);
@@ -600,7 +604,7 @@ export class EmployeeService {
     }
 
     return this.prisma.$transaction(async (prisma) => {
-      if (request.status === 'Waiting CEO' || request.status.includes('Approved')) {
+      if (request.status === 'PENDING_EXECUTIVE' || request.status === 'APPROVED') {
         const currentYear = new Date(request.startDate).getFullYear();
         const leaveBalance = await prisma.leaveBalance.findFirst({
           where: {
@@ -743,7 +747,7 @@ export class EmployeeService {
   async getAllCompanyLeaves() {
     return this.prisma.leaveRequest.findMany({
       where: {
-        status: { contains: 'Approved' } // Only show approved leaves for the whole company calendar
+        status: 'APPROVED' // Only show approved leaves for the whole company calendar
       },
       orderBy: { createdAt: 'desc' },
       include: {

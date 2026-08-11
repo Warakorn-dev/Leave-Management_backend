@@ -170,6 +170,23 @@ export class HrController {
     return this.hrService.findAllLeaves();
   }
 
+  @Get('leaves/pending-verify')
+  @ApiOperation({ summary: 'Get all pending verify leave requests' })
+  getPendingVerify() {
+    return this.hrService.getPendingVerify();
+  }
+
+  @Put('leaves/:id/verify')
+  @ApiOperation({ summary: 'Verify (Approve) or Reject a leave request' })
+  processLeaveRequest(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body('action') action: 'Approve' | 'Reject',
+    @Body('comment') comment?: string
+  ) {
+    return this.hrService.processLeaveRequest(req.user.id, id, action, { comment });
+  }
+
   // --- Public Holidays ---
   @Post('holidays')
   @ApiOperation({ summary: 'Create a new public holiday' })

@@ -3,9 +3,14 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateDepartmentDto, UpdateDepartmentDto, CreatePositionDto, UpdatePositionDto, CreateLeaveTypeDto, UpdateLeaveTypeDto, CreateEmployeeDto, UpdateEmployeeDto, CreatePublicHolidayDto, UpdatePublicHolidayDto, UpdateLeaveBalanceDto } from './dto/hr.dto';
 import * as bcrypt from 'bcrypt';
 
+import { NotificationService } from '../notification/notification.service';
+
 @Injectable()
 export class HrService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    private notificationService: NotificationService,
+  ) { }
 
   // --- Departments ---
   async createDepartment(dto: CreateDepartmentDto) {
@@ -482,7 +487,7 @@ export class HrService {
 
     const [totalEmployees, pendingRequests, announcements, activities, employee] = await Promise.all([
       this.prisma.employee.count(),
-      this.prisma.leaveRequest.count({ where: { status: 'Pending' } }),
+      this.prisma.leaveRequest.count({ where: { status: 'PENDING_VERIFY' } }),
       this.prisma.announcement.findMany({ take: 2, orderBy: { createdAt: 'desc' } }),
       this.prisma.leaveRequest.findMany({
         take: 3,
@@ -567,7 +572,7 @@ export class HrService {
       const vacationBalance = employee.leaveBalances.find(b => b.year === currentYear && (b.leaveType?.name.includes('พักผ่อน') || b.leaveType?.name.includes('พักร้อน')));
       if (vacationBalance) remainingVacation = vacationBalance.remainingDays;
 
-      personalPending = employee.leaveRequests.filter(r => r.status === 'Pending' || r.status === 'Waiting CEO').length;
+      personalPending = employee.leaveRequests.filter(r => r.status.startsWith('PENDING_')).length;
       personalApproved = employee.leaveRequests.filter(r => r.status.includes('Approved') && new Date(r.startDate).getFullYear() === currentYear).length;
       personalRejected = employee.leaveRequests.filter(r => r.status.includes('Rejected')).length;
     }
@@ -787,6 +792,119 @@ export class HrService {
       data: {
         remainingDays: dto.remainingDays
       }
+    });
+  }
+  // --- Leave Verification (HR) ---
+  async getPendingVerify() {
+    return this.prisma.leaveRequest.findMany({
+      where: { status: 'PENDING_VERIFY' },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        employee: { 
+          select: { 
+            id: true,
+            employeeCode: true,
+            title: true,
+            firstName: true, 
+            lastName: true,
+            department: { select: { name: true } },
+            position: { select: { name: true } },
+            user: { select: { id: true, avatarUrl: true, role: { select: { name: true } } } }
+          } 
+        },
+        leaveType: true,
+        attachments: true,
+        approvals: { orderBy: { createdAt: 'desc' } }
+      }
+    });
+  }
+
+  async processLeaveRequest(hrUserId: string, requestId: string, action: 'Approve' | 'Reject', dto: { comment?: string }) {
+    const request = await this.prisma.leaveRequest.findUnique({ 
+      where: { id: requestId },
+      include: { leaveType: true, employee: true }
+    });
+
+    if (!request || request.status !== 'PENDING_VERIFY') {
+      throw new BadRequestException('Invalid request or already verified');
+    }
+
+    let nextStatus = '';
+    if (action === 'Reject') {
+      nextStatus = 'REJECTED';
+    } else {
+      nextStatus = 'PENDING_SUPERVISOR';
+    }
+
+    return this.prisma.$transaction(async (prisma) => {
+      const updatedRequest = await prisma.leaveRequest.update({
+        where: { id: requestId },
+        data: { status: nextStatus },
+      });
+
+      await prisma.leaveApproval.create({
+        data: {
+          leaveRequestId: requestId,
+          approverId: hrUserId,
+          status: nextStatus,
+          comment: dto.comment,
+        }
+      });
+
+      return updatedRequest;
+    }).then(async (updatedRequest) => {
+      try {
+        const employeeUser = await this.prisma.user.findUnique({ where: { id: request.employee.userId } });
+        
+        if (action === 'Reject' && employeeUser?.email) {
+          this.notificationService.sendEmail(
+            employeeUser.email,
+            `[Leave Request] คำขอลางานของคุณถูกปฏิเสธ (ตรวจสอบเบื้องต้น)`,
+            `เรียน ${request.employee.firstName},\n\nคำขอ${request.leaveType.name} ของคุณถูกปฏิเสธในขั้นตอนตรวจสอบโดย HR\nเหตุผล: ${dto.comment || '-'}\n\nกรุณาเข้าสู่ระบบเพื่อยื่นคำขอใหม่หรือแก้ไข`
+          );
+        } else if (action === 'Approve') {
+          // Notify managers
+          const managers = await this.prisma.employee.findMany({
+            where: { departmentId: request.employee.departmentId, user: { role: { name: 'Manager' } } },
+            include: { user: true }
+          });
+          for (const m of managers) {
+            if (m.user?.id) {
+              await this.prisma.notification.create({
+                data: {
+                  userId: m.user.id,
+                  title: 'มีคำขอลาผ่านการตรวจสอบแล้ว',
+                  message: `คำขอลาของ ${request.employee.firstName} ผ่านการตรวจสอบจาก HR แล้ว รอการอนุมัติจากคุณ`,
+                  type: 'NEW_ORDER',
+                  redirectUrl: '/dashboard/manager/approve',
+                }
+              });
+            }
+            if (m.user?.email) {
+              this.notificationService.sendEmail(
+                m.user.email,
+                `[Leave Request] คำขอลาของ ${request.employee.firstName} รอการอนุมัติ`,
+                `เรียน ${m.firstName},\n\nคำขอลาของ ${request.employee.firstName} ผ่านการตรวจสอบเบื้องต้นแล้ว\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบและอนุมัติ`
+              );
+            }
+          }
+        }
+        
+        if (employeeUser?.id) {
+          await this.prisma.notification.create({
+            data: {
+              userId: employeeUser.id,
+              title: action === 'Reject' ? 'คำขอลาถูกปฏิเสธโดยฝ่ายบุคคล' : 'คำขอลาผ่านการตรวจสอบเบื้องต้น',
+              message: action === 'Reject' ? `เหตุผล: ${dto.comment || '-'}` : `คำขอลาของคุณกำลังรอการอนุมัติจากหัวหน้างาน`,
+              type: 'SYSTEM',
+              redirectUrl: '/dashboard/user/history',
+            }
+          });
+        }
+      } catch (e) {
+        console.error('Failed to send notification', e);
+      }
+      return updatedRequest;
     });
   }
 }

@@ -144,4 +144,9 @@ export class UpdateLeaveRequestDto {
   @IsString()
   @IsOptional()
   leaveTypeId?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  status?: string;
 }
