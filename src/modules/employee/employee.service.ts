@@ -215,20 +215,27 @@ export class EmployeeService {
     const yearStart = new Date(`${buddhistYear - 543}-01-01T00:00:00.000Z`);
     const yearEnd = new Date(`${buddhistYear - 543 + 1}-01-01T00:00:00.000Z`);
 
-    const lastRequest = await this.prisma.leaveRequest.findFirst({
+    const allRequests = await this.prisma.leaveRequest.findMany({
       where: {
         requestCode: { endsWith: `-${buddhistYear}` },
         createdAt: { gte: yearStart, lt: yearEnd },
       },
-      orderBy: { requestCode: 'desc' },
       select: { requestCode: true },
     });
 
     let nextSeq = 1;
-    if (lastRequest?.requestCode) {
-      const parts = lastRequest.requestCode.split('-');
-      const lastSeq = Number.parseInt(parts[2], 10);
-      if (!Number.isNaN(lastSeq)) nextSeq = lastSeq + 1;
+    if (allRequests.length > 0) {
+      const maxSeq = allRequests.reduce((max, req) => {
+        if (req.requestCode) {
+          const parts = req.requestCode.split('-');
+          if (parts.length >= 3) {
+            const seq = Number.parseInt(parts[2], 10);
+            if (!Number.isNaN(seq) && seq > max) return seq;
+          }
+        }
+        return max;
+      }, 0);
+      nextSeq = maxSeq + 1;
     }
 
     const requestCode = `L-${leaveTypeCode}-${String(nextSeq).padStart(5, '0')}-${buddhistYear}`;
