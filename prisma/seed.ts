@@ -96,13 +96,13 @@ async function main() {
 
   // 4. Leave Types
   const leaveTypes = await Promise.all([
-    prisma.leaveType.create({ data: { name: 'ลาป่วย', defaultDays: 30, requiresCertificate: true, isSpecial: false } }),
-    prisma.leaveType.create({ data: { name: 'ลาเพื่อคลอดบุตร', defaultDays: 120, requiresCertificate: true, isSpecial: true } }),
-    prisma.leaveType.create({ data: { name: 'ลาเพื่อช่วยเหลือภริยาคลอดบุตร', defaultDays: 15, requiresCertificate: true, isSpecial: true } }),
-    prisma.leaveType.create({ data: { name: 'ลากิจธุระอันจำเป็น', defaultDays: 3, requiresCertificate: false, isSpecial: false } }),
-    prisma.leaveType.create({ data: { name: 'ลาเพื่อทำหมัน', defaultDays: 365, requiresCertificate: true, isSpecial: true } }),
-    prisma.leaveType.create({ data: { name: 'ลาเพื่อรับราชการทหาร', defaultDays: 60, requiresCertificate: true, isSpecial: true } }),
-    prisma.leaveType.create({ data: { name: 'ลาพักผ่อนประจำปี (พักร้อน)', defaultDays: 6, requiresCertificate: false, isSpecial: false } }),
+    prisma.leaveType.create({ data: { code: '01', name: 'ลาป่วย', defaultDays: 30, requiresCertificate: true, isSpecial: false } }),
+    prisma.leaveType.create({ data: { code: '02', name: 'ลากิจธุระอันจำเป็น', defaultDays: 3, requiresCertificate: false, isSpecial: false } }),
+    prisma.leaveType.create({ data: { code: '03', name: 'ลาเพื่อคลอดบุตร', defaultDays: 120, requiresCertificate: true, isSpecial: true } }),
+    prisma.leaveType.create({ data: { code: '04', name: 'ลาเพื่อช่วยเหลือภริยาคลอดบุตร', defaultDays: 15, requiresCertificate: true, isSpecial: true } }),
+    prisma.leaveType.create({ data: { code: '05', name: 'ลาเพื่อทำหมัน', defaultDays: 365, requiresCertificate: true, isSpecial: true } }),
+    prisma.leaveType.create({ data: { code: '06', name: 'ลาเพื่อรับราชการทหาร', defaultDays: 60, requiresCertificate: true, isSpecial: true } }),
+    prisma.leaveType.create({ data: { code: '07', name: 'ลาพักผ่อนประจำปี (พักร้อน)', defaultDays: 6, requiresCertificate: false, isSpecial: false } }),
   ]);
 
   // 5. Users & Employees

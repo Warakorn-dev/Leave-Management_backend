@@ -146,6 +146,7 @@ model LeaveBalance {
 
 model LeaveRequest {
   id            String            @id @default(uuid())
+  requestCode   String?           @unique(map: "LeaveRequest_requestCode_key") @db.VarChar(20)
   employeeId    String
   leaveTypeId   String
   startDate     DateTime
@@ -171,6 +172,7 @@ model LeaveRequest {
 
 model LeaveType {
   id                  String         @id @default(uuid())
+  code                String         @unique(map: "LeaveType_code_key") @db.Char(2)
   name                String         @unique(map: "LeaveType_name_key")
   defaultDays         Float
   requiresCertificate Boolean        @default(false)

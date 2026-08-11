@@ -137,8 +137,19 @@ export class HrService {
 
   // --- Leave Types ---
   async createLeaveType(dto: CreateLeaveTypeDto) {
+    const leaveTypes = await this.prisma.leaveType.findMany({ select: { code: true } });
+    const highestCode = leaveTypes.reduce((highest, leaveType) => {
+      const value = Number.parseInt(leaveType.code, 10);
+      return Number.isInteger(value) ? Math.max(highest, value) : highest;
+    }, 0);
+
+    if (highestCode >= 99) {
+      throw new BadRequestException('ไม่สามารถสร้างรหัสประเภทการลาเพิ่มได้ (รองรับสูงสุด 99 ประเภท)');
+    }
+
     return this.prisma.leaveType.create({
       data: {
+        code: String(highestCode + 1).padStart(2, '0'),
         name: dto.name,
         defaultDays: dto.defaultDays,
         requiresCertificate: dto.requiresCertificate ?? false,
@@ -150,7 +161,7 @@ export class HrService {
   }
 
   async findAllLeaveTypes() {
-    return this.prisma.leaveType.findMany();
+    return this.prisma.leaveType.findMany({ orderBy: { code: 'asc' } });
   }
 
   async updateLeaveType(id: string, dto: UpdateLeaveTypeDto) {

@@ -207,9 +207,36 @@ export class EmployeeService {
       paidDays = calculatedDays;
     }
 
+    // Generate Leave Request Code: L-{leaveTypeCode}-{sequence}-{buddhistYear}
+    const buddhistYear = new Date().getFullYear() + 543;
+    const leaveTypeCode = balance.leaveType.code;
+
+    // Find the highest sequence number for the current Buddhist year
+    const yearStart = new Date(`${buddhistYear - 543}-01-01T00:00:00.000Z`);
+    const yearEnd = new Date(`${buddhistYear - 543 + 1}-01-01T00:00:00.000Z`);
+
+    const lastRequest = await this.prisma.leaveRequest.findFirst({
+      where: {
+        requestCode: { endsWith: `-${buddhistYear}` },
+        createdAt: { gte: yearStart, lt: yearEnd },
+      },
+      orderBy: { requestCode: 'desc' },
+      select: { requestCode: true },
+    });
+
+    let nextSeq = 1;
+    if (lastRequest?.requestCode) {
+      const parts = lastRequest.requestCode.split('-');
+      const lastSeq = Number.parseInt(parts[2], 10);
+      if (!Number.isNaN(lastSeq)) nextSeq = lastSeq + 1;
+    }
+
+    const requestCode = `L-${leaveTypeCode}-${String(nextSeq).padStart(5, '0')}-${buddhistYear}`;
+
     // Create Leave Request
     const leaveRequest = await this.prisma.leaveRequest.create({
       data: {
+        requestCode,
         employeeId: employee.id,
         leaveTypeId: dto.leaveTypeId,
         startDate: startDate,
