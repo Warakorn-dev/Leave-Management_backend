@@ -713,6 +713,7 @@ export class HrService {
 
     return leaves.map(leave => ({
       id: leave.id,
+      requestCode: leave.requestCode,
       employeeId: leave.employeeId,
       leaveTypeId: leave.leaveTypeId,
       employeeName: `${leave.employee.firstName} ${leave.employee.lastName}`,

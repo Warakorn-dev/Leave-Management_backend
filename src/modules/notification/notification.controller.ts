@@ -13,8 +13,13 @@ export class NotificationController {
 
   @Get()
   @ApiOperation({ summary: 'Get all notifications for current user' })
-  getNotifications(@CurrentUser() user: any) {
-    return this.notificationService.getNotifications(user.id);
+  async getNotifications(@CurrentUser() user: any) {
+    try {
+      return await this.notificationService.getNotifications(user.id);
+    } catch (e) {
+      console.error("NOTIFICATION API ERROR:", e);
+      throw e;
+    }
   }
 
   @Patch(':id/read')
