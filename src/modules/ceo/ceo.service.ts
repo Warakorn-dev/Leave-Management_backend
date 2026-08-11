@@ -333,7 +333,7 @@ export class CeoService {
           where: { id: request.employee.userId },
           include: { role: true }
         });
-        const statusText = nextStatus.includes('Approved') ? 'อนุมัติ' : 'ปฏิเสธ';
+        const statusText = nextStatus === 'APPROVED' ? 'อนุมัติ' : 'ปฏิเสธ';
         const userRole = employeeUser?.role?.name?.toLowerCase() || 'user';
         const redirectUrl = userRole === 'manager' 
           ? '/dashboard/manager/history'

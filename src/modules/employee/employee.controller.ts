@@ -10,7 +10,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 @ApiTags('Employee Leave Module')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('Employee', 'Manager', 'HR', 'CEO') // All can be employees
+@Roles('Employee', 'Manager', 'HR', 'CEO', 'User') // All can be employees
 @Controller('leave')
 export class EmployeeController {
   constructor(private readonly employeeService: EmployeeService) {}

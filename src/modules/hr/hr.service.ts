@@ -822,7 +822,7 @@ export class HrService {
   async processLeaveRequest(hrUserId: string, requestId: string, action: 'Approve' | 'Reject', dto: { comment?: string }) {
     const request = await this.prisma.leaveRequest.findUnique({ 
       where: { id: requestId },
-      include: { leaveType: true, employee: true }
+      include: { leaveType: true, employee: { include: { user: { include: { role: true } } } } }
     });
 
     if (!request || request.status !== 'PENDING_VERIFY') {
@@ -833,7 +833,8 @@ export class HrService {
     if (action === 'Reject') {
       nextStatus = 'REJECTED';
     } else {
-      nextStatus = 'PENDING_SUPERVISOR';
+      const isManagerOrHR = ['Manager', 'HR'].includes(request.employee.user?.role?.name || '');
+      nextStatus = isManagerOrHR ? 'PENDING_EXECUTIVE' : 'PENDING_SUPERVISOR';
     }
 
     return this.prisma.$transaction(async (prisma) => {

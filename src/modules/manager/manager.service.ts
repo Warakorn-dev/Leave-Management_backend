@@ -90,10 +90,11 @@ export class ManagerService {
     if (action === 'Reject') {
       nextStatus = 'REJECTED';
     } else {
-      if (request.leaveType.code === '07') {
-        nextStatus = 'PENDING_EXECUTIVE';
-      } else {
+      const isNormalLeave = request.leaveType.name.includes('ลากิจ') || request.leaveType.name.includes('ลาป่วย');
+      if (isNormalLeave) {
         nextStatus = 'APPROVED';
+      } else {
+        nextStatus = 'PENDING_EXECUTIVE';
       }
     }
 

@@ -127,7 +127,7 @@ export class EmployeeService {
     const calculatedDays = this.calculateWorkingDays(startDate, endDate, holidays.map(h => h.date), dto.startFormat, dto.endFormat, isMaternityFemale, dto.leaveHours);
 
     if (calculatedDays <= 0) {
-      throw new BadRequestException('Leave duration must be greater than 0');
+      throw new BadRequestException('จำนวนวันลาเป็น 0 (อาจตรงกับวันหยุดหรือเสาร์-อาทิตย์) กรุณาเลือกวันใหม่อีกครั้ง');
     }
 
     let paidDays = calculatedDays;
@@ -240,6 +240,11 @@ export class EmployeeService {
 
     const requestCode = `L-${leaveTypeCode}-${String(nextSeq).padStart(5, '0')}-${buddhistYear}`;
 
+    // ทุกคำขอลาเริ่มที่ PENDING_VERIFY เพื่อให้ HR ตรวจสอบก่อนเสมอ
+    // Flow: PENDING_VERIFY → (HR) → PENDING_SUPERVISOR → (Manager) → APPROVED (ลาทั่วไป)
+    //       PENDING_VERIFY → (HR) → PENDING_SUPERVISOR → (Manager) → PENDING_EXECUTIVE → (CEO) → APPROVED (ลาพิเศษ)
+    const initialStatus = 'PENDING_VERIFY';
+
     // Create Leave Request
     const leaveRequest = await this.prisma.leaveRequest.create({
       data: {
@@ -254,7 +259,7 @@ export class EmployeeService {
         paidDays: paidDays,
         unpaidDays: unpaidDays,
         reason: dto.reason,
-        status: ['Manager', 'HR'].includes(employee.user?.role?.name) ? 'PENDING_EXECUTIVE' : 'PENDING_VERIFY',
+        status: initialStatus,
       }
     });
 
@@ -305,6 +310,34 @@ export class EmployeeService {
               hr.user.email,
               `[Leave Request] ${employee.firstName} ${employee.lastName} ได้ยื่นคำขอลางาน`,
               `เรียน ${hr.firstName},\n\n${employee.firstName} ${employee.lastName} ได้ยื่นคำขอ${leaveTypeName} (${durationText}) ${leaveTimeDetail}\nเหตุผล: ${dto.reason}\n\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบ`
+            );
+          }
+        }
+      } else if (leaveRequest.status === 'PENDING_SUPERVISOR') {
+        const managers = await this.prisma.employee.findMany({
+          where: { 
+            departmentId: employee.departmentId, 
+            user: { role: { name: 'Manager' } }
+          },
+          include: { user: true }
+        });
+        for (const manager of managers) {
+          if (manager.user?.id) {
+            await this.prisma.notification.create({
+              data: {
+                userId: manager.user.id,
+                title: 'มีคำขอลาใหม่ในแผนก',
+                message: `พนักงาน "${employee.firstName} ${employee.lastName}" ได้ยื่นคำขอ ${leaveTypeName} (${durationText}) ${leaveTimeDetail}`,
+                type: 'NEW_ORDER',
+                redirectUrl: '/dashboard/manager/approval',
+              }
+            });
+          }
+          if (manager.user?.email) {
+            this.notificationService.sendEmail(
+              manager.user.email,
+              `[Leave Request] ${employee.firstName} ${employee.lastName} ได้ยื่นคำขอลางาน`,
+              `เรียน ${manager.firstName},\n\n${employee.firstName} ${employee.lastName} ได้ยื่นคำขอ${leaveTypeName} (${durationText}) ${leaveTimeDetail}\nเหตุผล: ${dto.reason}\n\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบและพิจารณา`
             );
           }
         }
@@ -462,10 +495,7 @@ export class EmployeeService {
 
       const calculatedDays = this.calculateWorkingDays(newStartDate, newEndDate, holidays.map(h => h.date), dto.startFormat || request.startFormat, dto.endFormat || request.endFormat, isMaternityFemale, dto.leaveHours);
       if (calculatedDays <= 0) {
-        console.error('Leave duration calculation failed:', {
-          newStartDate, newEndDate, calculatedDays, dto, request
-        });
-        throw new BadRequestException('Leave duration must be greater than 0');
+        throw new BadRequestException('จำนวนวันลาเป็น 0 (อาจตรงกับวันหยุดหรือเสาร์-อาทิตย์) กรุณาเลือกวันใหม่อีกครั้ง');
       }
       
       const pendingLeave = await this.prisma.leaveRequest.aggregate({
@@ -747,7 +777,10 @@ export class EmployeeService {
   async getAllCompanyLeaves() {
     return this.prisma.leaveRequest.findMany({
       where: {
-        status: 'APPROVED' // Only show approved leaves for the whole company calendar
+        OR: [
+          { status: 'APPROVED' },
+          { status: 'Approved' },
+        ]
       },
       orderBy: { createdAt: 'desc' },
       include: {
