@@ -787,17 +787,27 @@ export class HrService {
 
   // --- Leave Balance ---
   async updateLeaveBalance(id: string, dto: UpdateLeaveBalanceDto) {
+    const balance = await this.prisma.leaveBalance.findUnique({ where: { id } });
+    if (!balance) {
+      throw new NotFoundException('Leave balance not found');
+    }
+
+    if (dto.remainingDays < 0 || dto.remainingDays > balance.totalDays) {
+      throw new BadRequestException(`Remaining leave balance must be between 0 and ${balance.totalDays}`);
+    }
+
     return this.prisma.leaveBalance.update({
       where: { id },
       data: {
-        remainingDays: dto.remainingDays
+        remainingDays: dto.remainingDays,
+        usedDays: balance.totalDays - dto.remainingDays,
       }
     });
   }
   // --- Leave Verification (HR) ---
   async getPendingVerify() {
     return this.prisma.leaveRequest.findMany({
-      where: { status: 'PENDING_VERIFY' },
+      where: { status: { in: ['PENDING_VERIFY', 'PENDING_CANCELLATION'] } },
       orderBy: { createdAt: 'desc' },
       include: {
         employee: { 
@@ -825,8 +835,95 @@ export class HrService {
       include: { leaveType: true, employee: { include: { user: { include: { role: true } } } } }
     });
 
-    if (!request || request.status !== 'PENDING_VERIFY') {
+    if (!request || !['PENDING_VERIFY', 'PENDING_CANCELLATION'].includes(request.status)) {
       throw new BadRequestException('Invalid request or already verified');
+    }
+
+    if (action === 'Reject' && !dto.comment?.trim()) {
+      throw new BadRequestException('A rejection reason is required');
+    }
+
+    if (request.status === 'PENDING_CANCELLATION') {
+      if (action === 'Approve') {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const startDay = new Date(request.startDate);
+        startDay.setHours(0, 0, 0, 0);
+        if (startDay <= today) {
+          throw new BadRequestException('Cannot cancel an approved leave on or after its start date');
+        }
+      }
+
+      const nextStatus = action === 'Approve' ? 'CANCELLED' : 'APPROVED';
+      return this.prisma.$transaction(async (prisma) => {
+        const updatedRequest = await prisma.leaveRequest.update({
+          where: { id: requestId },
+          data: { status: nextStatus },
+        });
+
+        await prisma.leaveApproval.create({
+          data: {
+            leaveRequestId: requestId,
+            approverId: hrUserId,
+            status: nextStatus,
+            comment: dto.comment?.trim() || null,
+          },
+        });
+
+        if (action === 'Approve') {
+          const balance = await prisma.leaveBalance.findFirst({
+            where: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: new Date(request.startDate).getFullYear(),
+            },
+          });
+          if (balance) {
+            const newRemainingDays = Math.min(
+              balance.totalDays,
+              balance.remainingDays + request.totalDays,
+            );
+            await prisma.leaveBalance.update({
+              where: { id: balance.id },
+              data: {
+                usedDays: Math.max(0, balance.totalDays - newRemainingDays),
+                remainingDays: newRemainingDays,
+              },
+            });
+          }
+        }
+        return updatedRequest;
+      }).then(async (updatedRequest) => {
+        const employeeUser = request.employee.user;
+        if (employeeUser?.id) {
+          const approved = action === 'Approve';
+          await this.prisma.notification.create({
+            data: {
+              userId: employeeUser.id,
+              title: approved ? 'คำขอยกเลิกใบลาได้รับการอนุมัติ' : 'คำขอยกเลิกใบลาถูกปฏิเสธ',
+              message: approved
+                ? `คำขอยกเลิก${request.leaveType.name} ของคุณได้รับการอนุมัติและคืนโควตาแล้ว`
+                : `คำขอยกเลิก${request.leaveType.name} ของคุณถูกปฏิเสธ เหตุผล: ${dto.comment?.trim()}`,
+              type: approved ? 'APPROVE' : 'REJECT',
+              redirectUrl: employeeUser.role?.name === 'Manager'
+                ? '/dashboard/manager/history'
+                : employeeUser.role?.name === 'HR'
+                  ? '/dashboard/hr/leave-history'
+                  : '/dashboard/user/history',
+            },
+          });
+          if (employeeUser.email) {
+            this.notificationService.sendEmail(
+              employeeUser.email,
+              approved ? '[Leave Cancellation] อนุมัติแล้ว' : '[Leave Cancellation] ไม่อนุมัติ',
+              approved
+                ? `คำขอยกเลิก${request.leaveType.name} ของคุณได้รับการอนุมัติและคืนโควตาแล้ว`
+                : `คำขอยกเลิก${request.leaveType.name} ของคุณถูกปฏิเสธ\nเหตุผล: ${dto.comment?.trim()}`,
+            );
+          }
+        }
+        return updatedRequest;
+      });
     }
 
     let nextStatus = '';
@@ -863,7 +960,7 @@ export class HrService {
             `[Leave Request] คำขอลางานของคุณถูกปฏิเสธ (ตรวจสอบเบื้องต้น)`,
             `เรียน ${request.employee.firstName},\n\nคำขอ${request.leaveType.name} ของคุณถูกปฏิเสธในขั้นตอนตรวจสอบโดย HR\nเหตุผล: ${dto.comment || '-'}\n\nกรุณาเข้าสู่ระบบเพื่อยื่นคำขอใหม่หรือแก้ไข`
           );
-        } else if (action === 'Approve') {
+        } else if (action === 'Approve' && nextStatus === 'PENDING_SUPERVISOR') {
           // Notify managers
           const managers = await this.prisma.employee.findMany({
             where: { departmentId: request.employee.departmentId, user: { role: { name: 'Manager' } } },
@@ -887,6 +984,22 @@ export class HrService {
                 `[Leave Request] คำขอลาของ ${request.employee.firstName} รอการอนุมัติ`,
                 `เรียน ${m.firstName},\n\nคำขอลาของ ${request.employee.firstName} ผ่านการตรวจสอบเบื้องต้นแล้ว\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบและอนุมัติ`
               );
+            }
+          }
+        } else if (action === 'Approve' && nextStatus === 'PENDING_EXECUTIVE') {
+          const ceos = await this.prisma.user.findMany({ where: { role: { name: 'CEO' } } });
+          for (const ceo of ceos) {
+            await this.prisma.notification.create({
+              data: {
+                userId: ceo.id,
+                title: 'มีคำขอลารอผู้บริหารอนุมัติ',
+                message: `คำขอ${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} รอการอนุมัติจากผู้บริหาร`,
+                type: 'NEW_ORDER',
+                redirectUrl: '/dashboard/ceo/approval',
+              },
+            });
+            if (ceo.email) {
+              this.notificationService.sendEmail(ceo.email, '[Leave Request] รอผู้บริหารอนุมัติ', `คำขอ${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} รอการอนุมัติจากคุณ`);
             }
           }
         }

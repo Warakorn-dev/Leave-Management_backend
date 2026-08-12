@@ -86,7 +86,7 @@ export class EmployeeController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Cancel a pending leave request' })
+  @ApiOperation({ summary: 'Cancel an active leave request; approved future leave requires HR cancellation approval' })
   deleteLeaveRequest(@CurrentUser() user: any, @Param('id') id: string) {
     return this.employeeService.deleteLeaveRequest(user.id, id);
   }

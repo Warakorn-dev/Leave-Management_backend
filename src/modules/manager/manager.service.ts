@@ -82,6 +82,10 @@ export class ManagerService {
       throw new BadRequestException('Invalid request or already processed');
     }
 
+    if (action === 'Reject' && !dto.comment?.trim()) {
+      throw new BadRequestException('A rejection reason is required');
+    }
+
     if (request.employee.departmentId !== manager.departmentId) {
       throw new BadRequestException('Employee is not in your department');
     }
@@ -90,12 +94,9 @@ export class ManagerService {
     if (action === 'Reject') {
       nextStatus = 'REJECTED';
     } else {
-      const isNormalLeave = request.leaveType.name.includes('ลากิจ') || request.leaveType.name.includes('ลาป่วย');
-      if (isNormalLeave) {
-        nextStatus = 'APPROVED';
-      } else {
-        nextStatus = 'PENDING_EXECUTIVE';
-      }
+      // The leave-type configuration controls the workflow; do not infer it
+      // from a Thai display name, which HR can change at any time.
+      nextStatus = request.leaveType.isSpecial ? 'PENDING_EXECUTIVE' : 'APPROVED';
     }
 
     return this.prisma.$transaction(async (prisma) => {
@@ -127,12 +128,15 @@ export class ManagerService {
         });
 
         if (leaveBalance) {
-          const newUsedDays = leaveBalance.usedDays + request.totalDays;
-          const newRemainingDays = leaveBalance.totalDays - newUsedDays;
+          // Use the available balance directly because HR can adjust it
+          // manually; usedDays may otherwise be out of sync.
+          const newRemainingDays = leaveBalance.remainingDays - request.totalDays;
 
           if (newRemainingDays < 0) {
             throw new BadRequestException('Insufficient leave balance');
           }
+
+          const newUsedDays = leaveBalance.totalDays - newRemainingDays;
 
           await prisma.leaveBalance.update({
             where: { id: leaveBalance.id },

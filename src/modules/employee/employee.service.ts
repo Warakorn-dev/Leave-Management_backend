@@ -139,7 +139,7 @@ export class EmployeeService {
         where: { 
           employeeId: employee.id, 
           leaveTypeId: dto.leaveTypeId, 
-          status: { notIn: ['Rejected', 'Cancelled'] },
+          status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
           startDate: { gte: new Date(`${currentYear}-01-01`) }
         },
         _sum: { paidDays: true }
@@ -173,7 +173,7 @@ export class EmployeeService {
         where: { 
           employeeId: employee.id, 
           leaveTypeId: dto.leaveTypeId, 
-          status: { notIn: ['Rejected', 'Cancelled'] },
+          status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
           startDate: { gte: new Date(`${currentYear}-01-01`) }
         },
         _sum: { paidDays: true }
@@ -375,7 +375,10 @@ export class EmployeeService {
 
   async updateLeaveRequest(userId: string, requestId: string, dto: UpdateLeaveRequestDto) {
     const employee = await this.getEmployeeByUserId(userId);
-    const request = await this.prisma.leaveRequest.findUnique({ where: { id: requestId } });
+    const request = await this.prisma.leaveRequest.findUnique({
+      where: { id: requestId },
+      include: { employee: { include: { user: true } }, leaveType: true },
+    });
 
     if (!request) {
       throw new NotFoundException('Leave request not found');
@@ -520,7 +523,7 @@ export class EmployeeService {
           where: { 
             employeeId: employee.id, 
             leaveTypeId: request.leaveTypeId, 
-            status: { notIn: ['Rejected', 'Cancelled'] },
+            status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
             startDate: { gte: new Date(`${currentYear}-01-01`) },
             id: { not: requestId }
           },
@@ -553,7 +556,7 @@ export class EmployeeService {
           where: { 
             employeeId: employee.id, 
             leaveTypeId: request.leaveTypeId, 
-            status: { notIn: ['Rejected', 'Cancelled'] },
+            status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
             startDate: { gte: new Date(`${currentYear}-01-01`) },
             id: { not: requestId }
           },
@@ -613,14 +616,21 @@ export class EmployeeService {
 
   async deleteLeaveRequest(userId: string, requestId: string) {
     const employee = await this.getEmployeeByUserId(userId);
-    const request = await this.prisma.leaveRequest.findUnique({ where: { id: requestId } });
+    const request = await this.prisma.leaveRequest.findUnique({
+      where: { id: requestId },
+      include: { employee: { include: { user: true } }, leaveType: true },
+    });
 
     if (!request || request.employeeId !== employee.id) {
       throw new NotFoundException('Leave request not found');
     }
-    
-    if (request.status.toUpperCase() === 'REJECTED') {
-      throw new ForbiddenException('Cannot delete a rejected leave request');
+
+    if (request.status === 'PENDING_CANCELLATION') {
+      throw new ForbiddenException('Cancellation request is already waiting for HR review');
+    }
+
+    if (!['PENDING_VERIFY', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE', 'APPROVED'].includes(request.status)) {
+      throw new ForbiddenException('Only active leave requests can be cancelled');
     }
 
     if (request.status === 'APPROVED') {
@@ -633,36 +643,46 @@ export class EmployeeService {
       }
     }
 
-    return this.prisma.$transaction(async (prisma) => {
-      if (request.status === 'PENDING_EXECUTIVE' || request.status === 'APPROVED') {
-        const currentYear = new Date(request.startDate).getFullYear();
-        const leaveBalance = await prisma.leaveBalance.findFirst({
-          where: {
-            employeeId: request.employeeId,
-            leaveTypeId: request.leaveTypeId,
-            year: currentYear
-          }
+    // An approved future leave requires HR confirmation before it is cancelled
+    // and its balance is returned.
+    if (request.status === 'APPROVED') {
+      const updatedRequest = await this.prisma.leaveRequest.update({
+        where: { id: requestId },
+        data: { status: 'PENDING_CANCELLATION' },
+      });
+
+      const hrs = await this.prisma.employee.findMany({
+        where: { user: { role: { name: 'HR' } } },
+        include: { user: true },
+      });
+
+      for (const hr of hrs) {
+        await this.prisma.notification.create({
+          data: {
+            userId: hr.userId,
+            title: 'มีคำขอยกเลิกใบลารอตรวจสอบ',
+            message: `${request.employee.firstName} ${request.employee.lastName} ขอยกเลิก${request.leaveType.name}`,
+            type: 'NEW_ORDER',
+            redirectUrl: '/dashboard/hr/approval',
+          },
         });
 
-        if (leaveBalance) {
-          const newUsedDays = leaveBalance.usedDays - request.totalDays;
-          const newRemainingDays = leaveBalance.totalDays - newUsedDays;
-
-          await prisma.leaveBalance.update({
-            where: { id: leaveBalance.id },
-            data: {
-              usedDays: newUsedDays,
-              remainingDays: newRemainingDays
-            }
-          });
+        if (hr.user.email) {
+          this.notificationService.sendEmail(
+            hr.user.email,
+            '[Leave Cancellation] รอตรวจสอบ',
+            `${request.employee.firstName} ${request.employee.lastName} ขอยกเลิก${request.leaveType.name}`,
+          );
         }
       }
-      
-      // Change status to Cancelled instead of deleting in all cases to preserve history
-      return prisma.leaveRequest.update({ 
-        where: { id: requestId },
-        data: { status: 'Cancelled' }
-      });
+
+      return updatedRequest;
+    }
+
+    // Requests that have not been approved yet may be withdrawn immediately.
+    return this.prisma.leaveRequest.update({
+      where: { id: requestId },
+      data: { status: 'CANCELLED' },
     });
   }
 

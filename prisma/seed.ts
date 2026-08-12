@@ -102,7 +102,9 @@ async function main() {
     prisma.leaveType.create({ data: { code: '04', name: 'ลาเพื่อช่วยเหลือภริยาคลอดบุตร', defaultDays: 15, requiresCertificate: true, isSpecial: true } }),
     prisma.leaveType.create({ data: { code: '05', name: 'ลาเพื่อทำหมัน', defaultDays: 365, requiresCertificate: true, isSpecial: true } }),
     prisma.leaveType.create({ data: { code: '06', name: 'ลาเพื่อรับราชการทหาร', defaultDays: 60, requiresCertificate: true, isSpecial: true } }),
-    prisma.leaveType.create({ data: { code: '07', name: 'ลาพักผ่อนประจำปี (พักร้อน)', defaultDays: 6, requiresCertificate: false, isSpecial: false } }),
+    prisma.leaveType.create({ data: { code: '07', name: 'ลาพักผ่อนประจำปี (พักร้อน)', defaultDays: 6, requiresCertificate: false, isSpecial: true } }),
+    prisma.leaveType.create({ data: { code: '08', name: 'ลาอุปสมบท', defaultDays: 120, requiresCertificate: true, isSpecial: true } }),
+    prisma.leaveType.create({ data: { code: '09', name: 'ลาไปประกอบพิธีฮัจย์', defaultDays: 120, requiresCertificate: true, isSpecial: true } }),
   ]);
 
   // 5. Users & Employees

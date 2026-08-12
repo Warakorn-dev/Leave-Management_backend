@@ -98,7 +98,7 @@ export class CeoService {
       let color = 'bg-amber-500';
       if (leave.status === 'APPROVED') { action = 'อนุมัติแล้ว'; color = 'bg-emerald-500'; }
       if (leave.status === 'REJECTED') { action = 'ถูกปฏิเสธ'; color = 'bg-red-500'; }
-      if (leave.status === 'Cancelled') { action = 'ยกเลิกคำขอลา'; color = 'bg-slate-500'; }
+      if (['CANCELLED', 'Cancelled'].includes(leave.status)) { action = 'ยกเลิกคำขอลา'; color = 'bg-slate-500'; }
 
       const empName = leave.employee?.firstName || 'พนักงาน';
       
@@ -253,6 +253,10 @@ export class CeoService {
       throw new BadRequestException('Request is not waiting for CEO approval');
     }
 
+    if (action === 'Reject' && !comment?.trim()) {
+      throw new BadRequestException('A rejection reason is required');
+    }
+
     const nextStatus = action === 'Approve' ? 'APPROVED' : 'REJECTED';
 
     return this.prisma.$transaction(async (prisma) => {
@@ -309,12 +313,16 @@ export class CeoService {
           // Wait, is balance deducted during creation?
           // The employee.service.ts createLeaveRequest does NOT deduct balance! It only validates.
           // So we must deduct it here.
-          const newUsedDays = leaveBalance.usedDays + request.totalDays;
-          const newRemainingDays = leaveBalance.totalDays - newUsedDays;
+          // remainingDays is the authoritative available balance. HR can adjust
+          // it manually, so recalculating it from totalDays and usedDays can use
+          // stale data and incorrectly reject a valid CEO approval.
+          const newRemainingDays = leaveBalance.remainingDays - request.totalDays;
 
           if (newRemainingDays < 0) {
             throw new BadRequestException('Insufficient leave balance');
           }
+
+          const newUsedDays = leaveBalance.totalDays - newRemainingDays;
 
           await prisma.leaveBalance.update({
             where: { id: leaveBalance.id },
