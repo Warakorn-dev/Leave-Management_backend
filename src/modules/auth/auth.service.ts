@@ -15,6 +15,8 @@ export class AuthService {
     private notificationService: NotificationService,
   ) { }
 
+  private captchaStore = new Map<string, { captchaCode: string, isUsed: boolean, expiredAt: Date }>();
+
   async generateCaptcha(theme?: string) {
     const isLight = theme === 'gray' || theme === 'light';
     const textColor = isLight ? '#ffffffff' : '#000000ff';
@@ -30,15 +32,12 @@ export class AuthService {
     });
 
     let svgData = captcha.data.replace(/<path\b([^>]*)>/g, (match, attrs) => {
-      // Extract the 'd' attribute (the shape data)
       const dMatch = attrs.match(/d=['"]([^'"]+)['"]/);
       const d = dMatch ? dMatch[1] : '';
 
-      // If it's a noise line (usually has fill="none")
       if (attrs.includes('fill="none"') || attrs.includes("fill='none'")) {
         return `<path d="${d}" fill="none" stroke="${noiseColor}" stroke-width="1"/>`;
       }
-      // Otherwise, it's a text path
       return `<path d="${d}" fill="${textColor}" stroke="${textColor}" stroke-width="1.5" stroke-linejoin="round"/>`;
     });
 
@@ -46,17 +45,23 @@ export class AuthService {
 
     const expiredAt = new Date();
     expiredAt.setMinutes(expiredAt.getMinutes() + 10);
+    const captchaId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
-    const newCaptcha = await this.prisma.captcha.create({
-      data: {
-        captchaCode: captcha.text,
-        isUsed: false,
-        expiredAt: expiredAt,
-      }
+    this.captchaStore.set(captchaId, {
+      captchaCode: captcha.text,
+      isUsed: false,
+      expiredAt: expiredAt,
     });
 
+    // Clean up expired captchas
+    for (const [key, value] of this.captchaStore.entries()) {
+      if (new Date() > value.expiredAt) {
+        this.captchaStore.delete(key);
+      }
+    }
+
     return {
-      captcha_id: newCaptcha.id,
+      captcha_id: captchaId,
       captcha_image: `data:image/svg+xml;base64,${Buffer.from(svgData).toString('base64')}`,
     };
   }
@@ -64,25 +69,19 @@ export class AuthService {
   async verifyCaptcha(verifyDto: VerifyCaptchaDto) {
     const { captchaId, captchaCode } = verifyDto;
 
-    const captchaRecord = await this.prisma.captcha.findUnique({
-      where: { id: captchaId }
-    });
+    const captchaRecord = this.captchaStore.get(captchaId);
 
     if (!captchaRecord) {
       throw new BadRequestException('รหัส CAPTCHA ไม่ถูกต้องหรือไม่มีอยู่ในระบบ');
     }
 
-    // Always mark as used immediately to prevent replay attacks
-    if (!captchaRecord.isUsed) {
-      await this.prisma.captcha.update({
-        where: { id: captchaId },
-        data: { isUsed: true }
-      });
-    }
-
     if (captchaRecord.isUsed) {
       throw new BadRequestException('รหัส CAPTCHA ถูกใช้งานไปแล้ว กรุณาขอใหม่');
     }
+
+    // Mark as used immediately to prevent replay attacks
+    captchaRecord.isUsed = true;
+    this.captchaStore.set(captchaId, captchaRecord);
 
     if (new Date() > captchaRecord.expiredAt) {
       throw new BadRequestException('รหัส CAPTCHA หมดอายุ กรุณาขอใหม่');
