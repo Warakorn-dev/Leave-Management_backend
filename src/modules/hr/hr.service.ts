@@ -3,9 +3,14 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateDepartmentDto, UpdateDepartmentDto, CreatePositionDto, UpdatePositionDto, CreateLeaveTypeDto, UpdateLeaveTypeDto, CreateEmployeeDto, UpdateEmployeeDto, CreatePublicHolidayDto, UpdatePublicHolidayDto, UpdateLeaveBalanceDto } from './dto/hr.dto';
 import * as bcrypt from 'bcrypt';
 
+import { NotificationService } from '../notification/notification.service';
+
 @Injectable()
 export class HrService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    private notificationService: NotificationService,
+  ) { }
 
   // --- Departments ---
   async createDepartment(dto: CreateDepartmentDto) {
@@ -24,26 +29,107 @@ export class HrService {
     return this.prisma.department.delete({ where: { id } });
   }
 
+
+
+  // --- Roles ---
+  async findAllRoles() {
+    const roles = await this.prisma.role.findMany({
+      orderBy: { name: 'asc' }
+    });
+    return { success: true, data: roles };
+  }
+
   // --- Positions ---
   async createPosition(dto: CreatePositionDto) {
-    return this.prisma.position.create({ data: dto });
+    if (dto.roleId && dto.departmentId) {
+      const role = await this.prisma.role.findUnique({ where: { id: dto.roleId } });
+      if (role && role.name.toLowerCase() === 'manager') {
+        const existingManager = await this.prisma.position.findFirst({
+          where: {
+            departmentId: dto.departmentId,
+            role: { name: role.name }
+          }
+        });
+        if (existingManager) {
+          throw new BadRequestException('แผนกนี้มีตำแหน่งผู้จัดการ (Manager) อยู่แล้ว ไม่สามารถเพิ่มได้อีก');
+        }
+      }
+    }
+
+    return this.prisma.position.create({
+      data: {
+        name: dto.name,
+        code: dto.code,
+        departmentId: dto.departmentId,
+        roleId: dto.roleId
+      }
+    });
   }
 
   async findAllPositions() {
     return this.prisma.position.findMany({
-      include: { department: true }
+      include: { department: true, role: true }
     });
   }
 
   async updatePosition(id: string, dto: UpdatePositionDto) {
     return this.prisma.$transaction(async (prisma) => {
-      const position = await prisma.position.update({ where: { id }, data: dto });
+      const existingPos = await prisma.position.findUnique({ where: { id } });
+      if (!existingPos) throw new NotFoundException('Position not found');
+      const deptId = dto.departmentId || existingPos.departmentId;
+
+      if (dto.roleId && deptId) {
+        const role = await prisma.role.findUnique({ where: { id: dto.roleId } });
+        if (role && role.name.toLowerCase() === 'manager') {
+          const existingManager = await prisma.position.findFirst({
+            where: {
+              id: { not: id },
+              departmentId: deptId,
+              role: { name: role.name }
+            }
+          });
+          if (existingManager) {
+            throw new BadRequestException('แผนกนี้มีตำแหน่งผู้จัดการ (Manager) อยู่แล้ว ไม่สามารถเพิ่มได้อีก');
+          }
+        }
+      }
+
+      const position = await prisma.position.update({
+        where: { id },
+        data: {
+          name: dto.name,
+          code: dto.code,
+          departmentId: dto.departmentId,
+          roleId: dto.roleId
+        }
+      });
 
       if (dto.departmentId) {
         await prisma.employee.updateMany({
           where: { positionId: id },
           data: { departmentId: dto.departmentId }
         });
+      }
+
+      // Cascade role update to all users holding this position
+      if (dto.roleId !== undefined) {
+        let assignedRoleId = dto.roleId;
+        if (assignedRoleId === null) {
+          const employeeRole = await prisma.role.findUnique({ where: { name: 'Employee' } });
+          if (employeeRole) {
+            assignedRoleId = employeeRole.id;
+          }
+        }
+
+        if (assignedRoleId) {
+          const employees = await prisma.employee.findMany({ where: { positionId: id } });
+          for (const emp of employees) {
+            await prisma.user.update({
+              where: { id: emp.userId },
+              data: { roleId: assignedRoleId }
+            });
+          }
+        }
       }
 
       return position;
@@ -56,8 +142,19 @@ export class HrService {
 
   // --- Leave Types ---
   async createLeaveType(dto: CreateLeaveTypeDto) {
+    const leaveTypes = await this.prisma.leaveType.findMany({ select: { code: true } });
+    const highestCode = leaveTypes.reduce((highest, leaveType) => {
+      const value = Number.parseInt(leaveType.code, 10);
+      return Number.isInteger(value) ? Math.max(highest, value) : highest;
+    }, 0);
+
+    if (highestCode >= 99) {
+      throw new BadRequestException('ไม่สามารถสร้างรหัสประเภทการลาเพิ่มได้ (รองรับสูงสุด 99 ประเภท)');
+    }
+
     return this.prisma.leaveType.create({
       data: {
+        code: String(highestCode + 1).padStart(2, '0'),
         name: dto.name,
         defaultDays: dto.defaultDays,
         requiresCertificate: dto.requiresCertificate ?? false,
@@ -69,7 +166,7 @@ export class HrService {
   }
 
   async findAllLeaveTypes() {
-    return this.prisma.leaveType.findMany();
+    return this.prisma.leaveType.findMany({ orderBy: { code: 'asc' } });
   }
 
   async updateLeaveType(id: string, dto: UpdateLeaveTypeDto) {
@@ -92,6 +189,15 @@ export class HrService {
     }
 
     let roleId = dto.roleId;
+
+    // Auto-assign role from position if available
+    if (dto.positionId) {
+      const position = await this.prisma.position.findUnique({ where: { id: dto.positionId } });
+      if (position && position.roleId) {
+        roleId = position.roleId;
+      }
+    }
+
     if (!roleId && dto.roleName) {
       const role = await this.prisma.role.findFirst({ where: { name: dto.roleName } });
       if (role) roleId = role.id;
@@ -171,6 +277,17 @@ export class HrService {
       if (!employee) throw new NotFoundException('Employee not found');
 
       let updatedRoleId = dto.roleId;
+
+      // Auto-assign role from position if position is updated
+      if (dto.positionId !== undefined && dto.positionId !== employee.positionId) {
+        if (dto.positionId) {
+          const position = await prisma.position.findUnique({ where: { id: dto.positionId } });
+          if (position && position.roleId) {
+            updatedRoleId = position.roleId;
+          }
+        }
+      }
+
       if (!updatedRoleId && dto.roleName) {
         const role = await prisma.role.findFirst({ where: { name: dto.roleName } });
         if (role) updatedRoleId = role.id;
@@ -370,7 +487,7 @@ export class HrService {
 
     const [totalEmployees, pendingRequests, announcements, activities, employee] = await Promise.all([
       this.prisma.employee.count(),
-      this.prisma.leaveRequest.count({ where: { status: 'Pending' } }),
+      this.prisma.leaveRequest.count({ where: { status: 'PENDING_VERIFY' } }),
       this.prisma.announcement.findMany({ take: 2, orderBy: { createdAt: 'desc' } }),
       this.prisma.leaveRequest.findMany({
         take: 3,
@@ -455,7 +572,7 @@ export class HrService {
       const vacationBalance = employee.leaveBalances.find(b => b.year === currentYear && (b.leaveType?.name.includes('พักผ่อน') || b.leaveType?.name.includes('พักร้อน')));
       if (vacationBalance) remainingVacation = vacationBalance.remainingDays;
 
-      personalPending = employee.leaveRequests.filter(r => r.status === 'Pending' || r.status === 'Waiting CEO').length;
+      personalPending = employee.leaveRequests.filter(r => r.status.startsWith('PENDING_')).length;
       personalApproved = employee.leaveRequests.filter(r => r.status.includes('Approved') && new Date(r.startDate).getFullYear() === currentYear).length;
       personalRejected = employee.leaveRequests.filter(r => r.status.includes('Rejected')).length;
     }
@@ -601,6 +718,7 @@ export class HrService {
 
     return leaves.map(leave => ({
       id: leave.id,
+      requestCode: leave.requestCode,
       employeeId: leave.employeeId,
       leaveTypeId: leave.leaveTypeId,
       employeeName: `${leave.employee.firstName} ${leave.employee.lastName}`,
@@ -635,6 +753,8 @@ export class HrService {
     }));
   }
 
+
+
   // --- Public Holidays ---
   async createHoliday(dto: CreatePublicHolidayDto) {
     return this.prisma.publicHoliday.create({
@@ -667,11 +787,238 @@ export class HrService {
 
   // --- Leave Balance ---
   async updateLeaveBalance(id: string, dto: UpdateLeaveBalanceDto) {
+    const balance = await this.prisma.leaveBalance.findUnique({ where: { id } });
+    if (!balance) {
+      throw new NotFoundException('Leave balance not found');
+    }
+
+    if (dto.remainingDays < 0 || dto.remainingDays > balance.totalDays) {
+      throw new BadRequestException(`Remaining leave balance must be between 0 and ${balance.totalDays}`);
+    }
+
     return this.prisma.leaveBalance.update({
       where: { id },
       data: {
-        remainingDays: dto.remainingDays
+        remainingDays: dto.remainingDays,
+        usedDays: balance.totalDays - dto.remainingDays,
       }
+    });
+  }
+  // --- Leave Verification (HR) ---
+  async getPendingVerify() {
+    return this.prisma.leaveRequest.findMany({
+      where: { status: { in: ['PENDING_VERIFY', 'PENDING_CANCELLATION'] } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        employee: { 
+          select: { 
+            id: true,
+            employeeCode: true,
+            title: true,
+            firstName: true, 
+            lastName: true,
+            department: { select: { name: true } },
+            position: { select: { name: true } },
+            user: { select: { id: true, avatarUrl: true, role: { select: { name: true } } } }
+          } 
+        },
+        leaveType: true,
+        attachments: true,
+        approvals: { orderBy: { createdAt: 'desc' } }
+      }
+    });
+  }
+
+  async processLeaveRequest(hrUserId: string, requestId: string, action: 'Approve' | 'Reject', dto: { comment?: string }) {
+    const request = await this.prisma.leaveRequest.findUnique({ 
+      where: { id: requestId },
+      include: { leaveType: true, employee: { include: { user: { include: { role: true } } } } }
+    });
+
+    if (!request || !['PENDING_VERIFY', 'PENDING_CANCELLATION'].includes(request.status)) {
+      throw new BadRequestException('Invalid request or already verified');
+    }
+
+    if (action === 'Reject' && !dto.comment?.trim()) {
+      throw new BadRequestException('A rejection reason is required');
+    }
+
+    if (request.status === 'PENDING_CANCELLATION') {
+      if (action === 'Approve') {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const startDay = new Date(request.startDate);
+        startDay.setHours(0, 0, 0, 0);
+        if (startDay <= today) {
+          throw new BadRequestException('Cannot cancel an approved leave on or after its start date');
+        }
+      }
+
+      const nextStatus = action === 'Approve' ? 'CANCELLED' : 'APPROVED';
+      return this.prisma.$transaction(async (prisma) => {
+        const updatedRequest = await prisma.leaveRequest.update({
+          where: { id: requestId },
+          data: { status: nextStatus },
+        });
+
+        await prisma.leaveApproval.create({
+          data: {
+            leaveRequestId: requestId,
+            approverId: hrUserId,
+            status: nextStatus,
+            comment: dto.comment?.trim() || null,
+          },
+        });
+
+        if (action === 'Approve') {
+          const balance = await prisma.leaveBalance.findFirst({
+            where: {
+              employeeId: request.employeeId,
+              leaveTypeId: request.leaveTypeId,
+              year: new Date(request.startDate).getFullYear(),
+            },
+          });
+          if (balance) {
+            const newRemainingDays = Math.min(
+              balance.totalDays,
+              balance.remainingDays + request.totalDays,
+            );
+            await prisma.leaveBalance.update({
+              where: { id: balance.id },
+              data: {
+                usedDays: Math.max(0, balance.totalDays - newRemainingDays),
+                remainingDays: newRemainingDays,
+              },
+            });
+          }
+        }
+        return updatedRequest;
+      }).then(async (updatedRequest) => {
+        const employeeUser = request.employee.user;
+        if (employeeUser?.id) {
+          const approved = action === 'Approve';
+          await this.prisma.notification.create({
+            data: {
+              userId: employeeUser.id,
+              title: approved ? 'คำขอยกเลิกใบลาได้รับการอนุมัติ' : 'คำขอยกเลิกใบลาถูกปฏิเสธ',
+              message: approved
+                ? `คำขอยกเลิก${request.leaveType.name} ของคุณได้รับการอนุมัติและคืนโควตาแล้ว`
+                : `คำขอยกเลิก${request.leaveType.name} ของคุณถูกปฏิเสธ เหตุผล: ${dto.comment?.trim()}`,
+              type: approved ? 'APPROVE' : 'REJECT',
+              redirectUrl: employeeUser.role?.name === 'Manager'
+                ? '/dashboard/manager/history'
+                : employeeUser.role?.name === 'HR'
+                  ? '/dashboard/hr/leave-history'
+                  : '/dashboard/user/history',
+            },
+          });
+          if (employeeUser.email) {
+            this.notificationService.sendEmail(
+              employeeUser.email,
+              approved ? '[Leave Cancellation] อนุมัติแล้ว' : '[Leave Cancellation] ไม่อนุมัติ',
+              approved
+                ? `คำขอยกเลิก${request.leaveType.name} ของคุณได้รับการอนุมัติและคืนโควตาแล้ว`
+                : `คำขอยกเลิก${request.leaveType.name} ของคุณถูกปฏิเสธ\nเหตุผล: ${dto.comment?.trim()}`,
+            );
+          }
+        }
+        return updatedRequest;
+      });
+    }
+
+    let nextStatus = '';
+    if (action === 'Reject') {
+      nextStatus = 'REJECTED';
+    } else {
+      const isManagerOrHR = ['Manager', 'HR'].includes(request.employee.user?.role?.name || '');
+      nextStatus = isManagerOrHR ? 'PENDING_EXECUTIVE' : 'PENDING_SUPERVISOR';
+    }
+
+    return this.prisma.$transaction(async (prisma) => {
+      const updatedRequest = await prisma.leaveRequest.update({
+        where: { id: requestId },
+        data: { status: nextStatus },
+      });
+
+      await prisma.leaveApproval.create({
+        data: {
+          leaveRequestId: requestId,
+          approverId: hrUserId,
+          status: nextStatus,
+          comment: dto.comment,
+        }
+      });
+
+      return updatedRequest;
+    }).then(async (updatedRequest) => {
+      try {
+        const employeeUser = await this.prisma.user.findUnique({ where: { id: request.employee.userId } });
+        
+        if (action === 'Reject' && employeeUser?.email) {
+          this.notificationService.sendEmail(
+            employeeUser.email,
+            `[Leave Request] คำขอลางานของคุณถูกปฏิเสธ (ตรวจสอบเบื้องต้น)`,
+            `เรียน ${request.employee.firstName},\n\nคำขอ${request.leaveType.name} ของคุณถูกปฏิเสธในขั้นตอนตรวจสอบโดย HR\nเหตุผล: ${dto.comment || '-'}\n\nกรุณาเข้าสู่ระบบเพื่อยื่นคำขอใหม่หรือแก้ไข`
+          );
+        } else if (action === 'Approve' && nextStatus === 'PENDING_SUPERVISOR') {
+          // Notify managers
+          const managers = await this.prisma.employee.findMany({
+            where: { departmentId: request.employee.departmentId, user: { role: { name: 'Manager' } } },
+            include: { user: true }
+          });
+          for (const m of managers) {
+            if (m.user?.id) {
+              await this.prisma.notification.create({
+                data: {
+                  userId: m.user.id,
+                  title: 'มีคำขอลาผ่านการตรวจสอบแล้ว',
+                  message: `คำขอลาของ ${request.employee.firstName} ผ่านการตรวจสอบจาก HR แล้ว รอการอนุมัติจากคุณ`,
+                  type: 'NEW_ORDER',
+                  redirectUrl: '/dashboard/manager/approve',
+                }
+              });
+            }
+            if (m.user?.email) {
+              this.notificationService.sendEmail(
+                m.user.email,
+                `[Leave Request] คำขอลาของ ${request.employee.firstName} รอการอนุมัติ`,
+                `เรียน ${m.firstName},\n\nคำขอลาของ ${request.employee.firstName} ผ่านการตรวจสอบเบื้องต้นแล้ว\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบและอนุมัติ`
+              );
+            }
+          }
+        } else if (action === 'Approve' && nextStatus === 'PENDING_EXECUTIVE') {
+          const ceos = await this.prisma.user.findMany({ where: { role: { name: 'CEO' } } });
+          for (const ceo of ceos) {
+            await this.prisma.notification.create({
+              data: {
+                userId: ceo.id,
+                title: 'มีคำขอลารอผู้บริหารอนุมัติ',
+                message: `คำขอ${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} รอการอนุมัติจากผู้บริหาร`,
+                type: 'NEW_ORDER',
+                redirectUrl: '/dashboard/ceo/approval',
+              },
+            });
+            if (ceo.email) {
+              this.notificationService.sendEmail(ceo.email, '[Leave Request] รอผู้บริหารอนุมัติ', `คำขอ${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} รอการอนุมัติจากคุณ`);
+            }
+          }
+        }
+        
+        if (employeeUser?.id) {
+          await this.prisma.notification.create({
+            data: {
+              userId: employeeUser.id,
+              title: action === 'Reject' ? 'คำขอลาถูกปฏิเสธโดยฝ่ายบุคคล' : 'คำขอลาผ่านการตรวจสอบเบื้องต้น',
+              message: action === 'Reject' ? `เหตุผล: ${dto.comment || '-'}` : `คำขอลาของคุณกำลังรอการอนุมัติจากหัวหน้างาน`,
+              type: 'SYSTEM',
+              redirectUrl: '/dashboard/user/history',
+            }
+          });
+        }
+      } catch (e) {
+        console.error('Failed to send notification', e);
+      }
+      return updatedRequest;
     });
   }
 }

@@ -7,13 +7,11 @@ import { NotificationService } from '../notification/notification.service';
 export class ManagerService {
   constructor(private prisma: PrismaService, private notificationService: NotificationService) {}
 
-  async getPendingRequests(managerUserId: string) {
-    const manager = await this.getEmployeeByUserId(managerUserId);
-    
-    // Get all requests from employees in the same department
+  async getPendingRequests(userId: string) {
+    const manager = await this.getEmployeeByUserId(userId);
     return this.prisma.leaveRequest.findMany({
       where: {
-        status: 'Pending',
+        status: 'PENDING_SUPERVISOR',
         employee: {
           departmentId: manager.departmentId,
           id: { not: manager.id } // Exclude manager's own leaves
@@ -80,8 +78,12 @@ export class ManagerService {
       include: { leaveType: true, employee: true }
     });
 
-    if (!request || request.status !== 'Pending') {
+    if (!request || request.status !== 'PENDING_SUPERVISOR') {
       throw new BadRequestException('Invalid request or already processed');
+    }
+
+    if (action === 'Reject' && !dto.comment?.trim()) {
+      throw new BadRequestException('A rejection reason is required');
     }
 
     if (request.employee.departmentId !== manager.departmentId) {
@@ -90,11 +92,11 @@ export class ManagerService {
 
     let nextStatus = '';
     if (action === 'Reject') {
-      nextStatus = 'Rejected Manager';
+      nextStatus = 'REJECTED';
     } else {
-      // Regular employees: Manager approval is final (Approved)
-      // Manager employees submitting their own leave are already set to 'Waiting CEO' at creation
-      nextStatus = 'Approved';
+      // The leave-type configuration controls the workflow; do not infer it
+      // from a Thai display name, which HR can change at any time.
+      nextStatus = request.leaveType.isSpecial ? 'PENDING_EXECUTIVE' : 'APPROVED';
     }
 
     return this.prisma.$transaction(async (prisma) => {
@@ -114,8 +116,8 @@ export class ManagerService {
         }
       });
 
-      // 3. Deduct Leave Balance if Manager Approves
-      if (action === 'Approve') {
+      // 3. Deduct Leave Balance if Manager Approves and status is final APPROVED
+      if (nextStatus === 'APPROVED') {
         const currentYear = new Date(request.startDate).getFullYear();
         const leaveBalance = await prisma.leaveBalance.findFirst({
           where: {
@@ -126,12 +128,15 @@ export class ManagerService {
         });
 
         if (leaveBalance) {
-          const newUsedDays = leaveBalance.usedDays + request.totalDays;
-          const newRemainingDays = leaveBalance.totalDays - newUsedDays;
+          // Use the available balance directly because HR can adjust it
+          // manually; usedDays may otherwise be out of sync.
+          const newRemainingDays = leaveBalance.remainingDays - request.totalDays;
 
           if (newRemainingDays < 0) {
             throw new BadRequestException('Insufficient leave balance');
           }
+
+          const newUsedDays = leaveBalance.totalDays - newRemainingDays;
 
           await prisma.leaveBalance.update({
             where: { id: leaveBalance.id },
@@ -147,15 +152,15 @@ export class ManagerService {
     }).then(async (updatedRequest) => {
       try {
         const employeeUser = await this.prisma.user.findUnique({ where: { id: request.employee.userId } });
-        const statusText = nextStatus.includes('Approved') ? 'อนุมัติ' : 'ปฏิเสธ';
+        const statusText = nextStatus.includes('APPROVED') ? 'อนุมัติ' : (nextStatus === 'PENDING_EXECUTIVE' ? 'ส่งต่อให้ผู้บริหารพิจารณา' : 'ปฏิเสธ');
 
         if (employeeUser?.id) {
           await this.prisma.notification.create({
             data: {
               userId: employeeUser.id,
-              title: statusText === 'อนุมัติ' ? 'คำขอลาได้รับการอนุมัติจาก Manager' : 'คำขอลาถูกปฏิเสธโดย Manager',
-              message: `คำขอ${request.leaveType.name} ของคุณได้รับการ${statusText}โดยผู้จัดการแผนกเรียบร้อยแล้ว`,
-              type: statusText === 'อนุมัติ' ? 'APPROVE' : 'REJECT',
+              title: statusText === 'ปฏิเสธ' ? 'คำขอลาถูกปฏิเสธโดย Manager' : 'ความคืบหน้าคำขอลาของคุณ',
+              message: statusText === 'ส่งต่อให้ผู้บริหารพิจารณา' ? `คำขอ${request.leaveType.name} ของคุณได้รับการตรวจสอบโดยผู้จัดการแล้ว กำลังรอผู้บริหารอนุมัติ` : `คำขอ${request.leaveType.name} ของคุณได้รับการ${statusText}โดยผู้จัดการแผนกเรียบร้อยแล้ว`,
+              type: statusText === 'ปฏิเสธ' ? 'REJECT' : (statusText === 'อนุมัติ' ? 'APPROVE' : 'SYSTEM'),
               redirectUrl: '/dashboard/user/history',
             }
           });
@@ -164,9 +169,35 @@ export class ManagerService {
         if (employeeUser?.email) {
           this.notificationService.sendEmail(
             employeeUser.email,
-            `[Leave Request] คำขอลางานของคุณถูก${statusText}`,
-            `เรียน ${request.employee.firstName},\n\nคำขอลา${request.leaveType.name} ของคุณ (วันที่ ${request.startDate.toLocaleDateString()} ถึง ${request.endDate.toLocaleDateString()}) ได้ถูก${statusText}โดยหัวหน้างานแล้ว\nหมายเหตุ: ${dto.comment || '-'}\n\nคุณสามารถตรวจสอบสถานะได้ในระบบ`
+            `[Leave Request] ความคืบหน้าคำขอลางานของคุณ`,
+            `เรียน ${request.employee.firstName},\n\nคำขอลา${request.leaveType.name} ของคุณ (วันที่ ${request.startDate.toLocaleDateString()} ถึง ${request.endDate.toLocaleDateString()}) ${statusText === 'ส่งต่อให้ผู้บริหารพิจารณา' ? 'กำลังรอการอนุมัติจากผู้บริหาร' : `ได้ถูก${statusText}โดยหัวหน้างานแล้ว`}\nหมายเหตุ: ${dto.comment || '-'}\n\nคุณสามารถตรวจสอบสถานะได้ในระบบ`
           );
+        }
+        
+        if (nextStatus === 'PENDING_EXECUTIVE') {
+          const ceos = await this.prisma.user.findMany({
+            where: { role: { name: 'CEO' } }
+          });
+          for (const ceo of ceos) {
+            if (ceo.id) {
+              await this.prisma.notification.create({
+                data: {
+                  userId: ceo.id,
+                  title: 'มีคำขอลาจากผู้จัดการแผนกส่งต่อมา',
+                  message: `ผู้จัดการได้ส่งต่อคำขอ ${request.leaveType.name} ของ "${request.employee.firstName} ${request.employee.lastName}"`,
+                  type: 'NEW_ORDER',
+                  redirectUrl: '/dashboard/ceo/approval',
+                }
+              });
+            }
+            if (ceo.email) {
+              this.notificationService.sendEmail(
+                ceo.email,
+                `[Leave Request] คำขอลาพักผ่อนส่งต่อจากผู้จัดการ`,
+                `เรียน CEO,\n\n${request.employee.firstName} ${request.employee.lastName} ได้ยื่นคำขอลาพักผ่อน ซึ่งผ่านการตรวจสอบจากหัวหน้างานแล้ว\nกรุณาเข้าสู่ระบบเพื่ออนุมัติ`
+              );
+            }
+          }
         }
       } catch (e) {
         console.error('Failed to send manager notification', e);

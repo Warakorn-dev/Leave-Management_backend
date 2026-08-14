@@ -146,6 +146,7 @@ model LeaveBalance {
 
 model LeaveRequest {
   id            String            @id @default(uuid())
+  requestCode   String?           @unique(map: "LeaveRequest_requestCode_key") @db.VarChar(20)
   employeeId    String
   leaveTypeId   String
   startDate     DateTime
@@ -171,6 +172,7 @@ model LeaveRequest {
 
 model LeaveType {
   id                  String         @id @default(uuid())
+  code                String         @unique(map: "LeaveType_code_key") @db.Char(2)
   name                String         @unique(map: "LeaveType_name_key")
   defaultDays         Float
   requiresCertificate Boolean        @default(false)
@@ -206,12 +208,15 @@ model Position {
   code         String?
   name         String
   departmentId String?
+  roleId       String?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   employee     Employee[]
   department   Department? @relation(fields: [departmentId], references: [id], map: "Position_departmentId_fkey")
+  role         Role?       @relation(fields: [roleId], references: [id], map: "Position_roleId_fkey")
 
   @@index([departmentId], map: "Position_departmentId_fkey")
+  @@index([roleId], map: "Position_roleId_fkey")
   @@map("position")
 }
 
@@ -226,11 +231,12 @@ model PublicHoliday {
 }
 
 model Role {
-  id        String   @id @default(uuid())
-  name      String   @unique(map: "Role_name_key")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        String     @id @default(uuid())
+  name      String     @unique(map: "Role_name_key")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
   user      User[]
+  position  Position[]
 
   @@map("role")
 }

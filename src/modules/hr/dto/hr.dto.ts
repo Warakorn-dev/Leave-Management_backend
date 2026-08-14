@@ -42,6 +42,11 @@ export class CreatePositionDto {
   @IsString()
   @IsOptional()
   departmentId?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  roleId?: string;
 }
 
 export class UpdatePositionDto {
@@ -59,6 +64,11 @@ export class UpdatePositionDto {
   @IsString()
   @IsOptional()
   departmentId?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  roleId?: string;
 }
 
 // LeaveType DTOs

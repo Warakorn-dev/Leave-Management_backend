@@ -10,7 +10,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 @ApiTags('Employee Leave Module')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('Employee', 'Manager', 'HR', 'CEO') // All can be employees
+@Roles('Employee', 'Manager', 'HR', 'CEO', 'User') // All can be employees
 @Controller('leave')
 export class EmployeeController {
   constructor(private readonly employeeService: EmployeeService) {}
@@ -86,7 +86,7 @@ export class EmployeeController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Cancel a pending leave request' })
+  @ApiOperation({ summary: 'Cancel an active leave request; approved future leave requires HR cancellation approval' })
   deleteLeaveRequest(@CurrentUser() user: any, @Param('id') id: string) {
     return this.employeeService.deleteLeaveRequest(user.id, id);
   }

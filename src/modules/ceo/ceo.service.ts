@@ -14,11 +14,11 @@ export class CeoService {
     
     // Calculate pending leaves (across all levels to show overall pending load)
     const pendingLeaves = await this.prisma.leaveRequest.count({ 
-      where: { status: { in: ['Pending', 'Waiting Manager', 'Waiting CEO'] } } 
+      where: { status: { in: ['PENDING_VERIFY', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'] } } 
     });
     
-    const approvedLeaves = await this.prisma.leaveRequest.count({ where: { status: 'Approved' } });
-    const rejectedLeaves = await this.prisma.leaveRequest.count({ where: { status: 'Rejected' } });
+    const approvedLeaves = await this.prisma.leaveRequest.count({ where: { status: 'APPROVED' } });
+    const rejectedLeaves = await this.prisma.leaveRequest.count({ where: { status: 'REJECTED' } });
 
     // Calculate leaves today
     const today = new Date();
@@ -28,7 +28,7 @@ export class CeoService {
     
     const leavesToday = await this.prisma.leaveRequest.count({
       where: {
-        status: 'Approved',
+        status: 'APPROVED',
         startDate: { lte: today },
         endDate: { gte: today }
       }
@@ -73,11 +73,11 @@ export class CeoService {
       remainingVacation = vacationBalance?.remainingDays || 0;
 
       employee.leaveRequests.forEach(req => {
-        if (req.status === 'Pending' || req.status.startsWith('Waiting')) personalPending++;
-        else if (req.status === 'Approved') {
+        if (req.status.startsWith('PENDING_')) personalPending++;
+        else if (req.status === 'APPROVED') {
           if (new Date(req.startDate).getFullYear() === currentYear) personalApproved++;
         }
-        else if (req.status === 'Rejected') personalRejected++;
+        else if (req.status === 'REJECTED') personalRejected++;
       });
     }
 
@@ -96,9 +96,9 @@ export class CeoService {
       
       let action = 'ยื่นคำขอลา';
       let color = 'bg-amber-500';
-      if (leave.status === 'Approved') { action = 'อนุมัติแล้ว'; color = 'bg-emerald-500'; }
-      if (leave.status === 'Rejected') { action = 'ถูกปฏิเสธ'; color = 'bg-red-500'; }
-      if (leave.status === 'Cancelled') { action = 'ยกเลิกคำขอลา'; color = 'bg-slate-500'; }
+      if (leave.status === 'APPROVED') { action = 'อนุมัติแล้ว'; color = 'bg-emerald-500'; }
+      if (leave.status === 'REJECTED') { action = 'ถูกปฏิเสธ'; color = 'bg-red-500'; }
+      if (['CANCELLED', 'Cancelled'].includes(leave.status)) { action = 'ยกเลิกคำขอลา'; color = 'bg-slate-500'; }
 
       const empName = leave.employee?.firstName || 'พนักงาน';
       
@@ -144,7 +144,7 @@ export class CeoService {
 
     const leavesToday = await this.prisma.leaveRequest.count({
       where: {
-        status: 'Approved',
+        status: 'APPROVED',
         startDate: { lte: today },
         endDate: { gte: today }
       }
@@ -164,7 +164,7 @@ export class CeoService {
 
     const leavesThisMonth = await this.prisma.leaveRequest.findMany({
       where: {
-        status: 'Approved',
+        status: 'APPROVED',
         startDate: { lte: lastDayOfMonth },
         endDate: { gte: firstDayOfMonth }
       },
@@ -249,11 +249,15 @@ export class CeoService {
       include: { leaveType: true, employee: true }
     });
 
-    if (!request || (request.status !== 'Waiting CEO' && request.status !== 'Pending')) {
+    if (!request || request.status !== 'PENDING_EXECUTIVE') {
       throw new BadRequestException('Request is not waiting for CEO approval');
     }
 
-    const nextStatus = action === 'Approve' ? 'Approved' : 'Rejected';
+    if (action === 'Reject' && !comment?.trim()) {
+      throw new BadRequestException('A rejection reason is required');
+    }
+
+    const nextStatus = action === 'Approve' ? 'APPROVED' : 'REJECTED';
 
     return this.prisma.$transaction(async (prisma) => {
       const updated = await prisma.leaveRequest.update({
@@ -270,7 +274,7 @@ export class CeoService {
         }
       });
 
-      if (action === 'Reject' && request.status === 'Approved') {
+      if (action === 'Reject' && request.status === 'APPROVED') {
         // Only refund if the request was actually fully approved and deducted before
         // (Wait, standard flow doesn't reject already Approved requests here, but just in case)
         const currentYear = new Date(request.startDate).getFullYear();
@@ -294,7 +298,7 @@ export class CeoService {
             }
           });
         }
-      } else if (action === 'Approve' && (request.status === 'Pending' || request.status === 'Waiting CEO')) {
+      } else if (action === 'Approve' && request.status === 'PENDING_EXECUTIVE') {
         const currentYear = new Date(request.startDate).getFullYear();
         const leaveBalance = await prisma.leaveBalance.findFirst({
           where: {
@@ -309,12 +313,16 @@ export class CeoService {
           // Wait, is balance deducted during creation?
           // The employee.service.ts createLeaveRequest does NOT deduct balance! It only validates.
           // So we must deduct it here.
-          const newUsedDays = leaveBalance.usedDays + request.totalDays;
-          const newRemainingDays = leaveBalance.totalDays - newUsedDays;
+          // remainingDays is the authoritative available balance. HR can adjust
+          // it manually, so recalculating it from totalDays and usedDays can use
+          // stale data and incorrectly reject a valid CEO approval.
+          const newRemainingDays = leaveBalance.remainingDays - request.totalDays;
 
           if (newRemainingDays < 0) {
             throw new BadRequestException('Insufficient leave balance');
           }
+
+          const newUsedDays = leaveBalance.totalDays - newRemainingDays;
 
           await prisma.leaveBalance.update({
             where: { id: leaveBalance.id },
@@ -333,7 +341,7 @@ export class CeoService {
           where: { id: request.employee.userId },
           include: { role: true }
         });
-        const statusText = nextStatus.includes('Approved') ? 'อนุมัติ' : 'ปฏิเสธ';
+        const statusText = nextStatus === 'APPROVED' ? 'อนุมัติ' : 'ปฏิเสธ';
         const userRole = employeeUser?.role?.name?.toLowerCase() || 'user';
         const redirectUrl = userRole === 'manager' 
           ? '/dashboard/manager/history'

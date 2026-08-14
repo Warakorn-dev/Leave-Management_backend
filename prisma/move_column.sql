@@ -1,0 +1,1 @@
+ALTER TABLE `leaverequest` MODIFY COLUMN `requestCode` VARCHAR(20) NOT NULL FIRST;

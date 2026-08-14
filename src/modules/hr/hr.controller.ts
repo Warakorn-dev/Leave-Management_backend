@@ -57,6 +57,13 @@ export class HrController {
     return this.hrService.deleteDepartment(id);
   }
 
+  // --- Roles ---
+  @Get('roles')
+  @ApiOperation({ summary: 'Get all roles' })
+  findAllRoles() {
+    return this.hrService.findAllRoles();
+  }
+
   // --- Positions ---
   @Post('positions')
   @ApiOperation({ summary: 'Create a new position' })
@@ -161,6 +168,23 @@ export class HrController {
   @ApiOperation({ summary: 'Get all leave requests across the company' })
   findAllLeaves() {
     return this.hrService.findAllLeaves();
+  }
+
+  @Get('leaves/pending-verify')
+  @ApiOperation({ summary: 'Get all pending verify leave requests' })
+  getPendingVerify() {
+    return this.hrService.getPendingVerify();
+  }
+
+  @Put('leaves/:id/verify')
+  @ApiOperation({ summary: 'Verify (Approve) or Reject a leave request' })
+  processLeaveRequest(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body('action') action: 'Approve' | 'Reject',
+    @Body('comment') comment?: string
+  ) {
+    return this.hrService.processLeaveRequest(req.user.id, id, action, { comment });
   }
 
   // --- Public Holidays ---
