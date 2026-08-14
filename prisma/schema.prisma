@@ -158,6 +158,9 @@ model LeaveRequest {
   unpaidDays    Float             @default(0)
   reason        String            @db.Text
   status        String            @default("Pending")
+  isViewedByHr  Boolean           @default(false)
+  currentHrReviewerId String?
+  hrReviewStartedAt   DateTime?
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
   attachments   LeaveAttachment[]

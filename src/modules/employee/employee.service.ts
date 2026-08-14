@@ -9,6 +9,47 @@ import * as path from 'path';
 export class EmployeeService {
   constructor(private prisma: PrismaService, private notificationService: NotificationService) {}
 
+  private checkLeaveOverlap(
+    newReq: { startDate: Date; endDate: Date; startFormat: string; endFormat: string; leaveMode?: string },
+    existingReq: { startDate: Date; endDate: Date; startFormat: string; endFormat: string; leaveMode?: string }
+  ): boolean {
+    const getRange = (req: any) => {
+      let start = new Date(req.startDate).getTime();
+      let end = new Date(req.endDate).getTime();
+      
+      const isHourly = req.startFormat === 'hourly' || req.leaveMode === 'hourly';
+      
+      if (!isHourly) {
+        const dStart = new Date(start);
+        dStart.setHours(0, 0, 0, 0);
+        start = dStart.getTime();
+
+        const dEnd = new Date(end);
+        dEnd.setHours(23, 59, 59, 999);
+        end = dEnd.getTime();
+        
+        // Single day half-day adjustment
+        const dStartOnlyDate = new Date(dStart).setHours(0, 0, 0, 0);
+        const dEndOnlyDate = new Date(dEnd).setHours(0, 0, 0, 0);
+        
+        if (dStartOnlyDate === dEndOnlyDate) {
+          if (req.startFormat === 'morning') {
+            end = new Date(dStart).setHours(12, 0, 0, 0);
+          } else if (req.startFormat === 'afternoon') {
+            start = new Date(dStart).setHours(12, 0, 0, 0);
+          }
+        }
+      }
+      return { start, end };
+    };
+
+    const r1 = getRange(newReq);
+    const r2 = getRange(existingReq);
+
+    return r1.start < r2.end && r1.end > r2.start;
+  }
+
+
   async createLeaveRequest(userId: string, dto: CreateLeaveRequestDto) {
     const employee = await this.getEmployeeByUserId(userId);
 
@@ -129,6 +170,24 @@ export class EmployeeService {
     if (calculatedDays <= 0) {
       throw new BadRequestException('จำนวนวันลาเป็น 0 (อาจตรงกับวันหยุดหรือเสาร์-อาทิตย์) กรุณาเลือกวันใหม่อีกครั้ง');
     }
+
+    // --- OVERLAP VALIDATION ---
+    const existingRequests = await this.prisma.leaveRequest.findMany({
+      where: {
+        employeeId: employee.id,
+        status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] }
+      }
+    });
+
+    for (const req of existingRequests) {
+      if (this.checkLeaveOverlap(
+        { startDate, endDate, startFormat: dto.startFormat || 'full', endFormat: dto.endFormat || 'full', leaveMode: dto.leaveMode },
+        { startDate: req.startDate, endDate: req.endDate, startFormat: req.startFormat, endFormat: req.endFormat }
+      )) {
+        throw new BadRequestException('คุณมีการลางานในช่วงวันที่/เวลานี้อยู่แล้ว ไม่สามารถยื่นคำขอลาซ้ำซ้อนได้');
+      }
+    }
+    // -------------------------
 
     let paidDays = calculatedDays;
     let unpaidDays = 0;
@@ -500,7 +559,26 @@ export class EmployeeService {
       if (calculatedDays <= 0) {
         throw new BadRequestException('จำนวนวันลาเป็น 0 (อาจตรงกับวันหยุดหรือเสาร์-อาทิตย์) กรุณาเลือกวันใหม่อีกครั้ง');
       }
-      
+
+      // --- OVERLAP VALIDATION ---
+      const existingRequests = await this.prisma.leaveRequest.findMany({
+        where: {
+          employeeId: employee.id,
+          id: { not: requestId },
+          status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] }
+        }
+      });
+
+      for (const req of existingRequests) {
+        if (this.checkLeaveOverlap(
+          { startDate: newStartDate, endDate: newEndDate, startFormat: dto.startFormat || request.startFormat || 'full', endFormat: dto.endFormat || request.endFormat || 'full', leaveMode: dto.leaveMode },
+          { startDate: req.startDate, endDate: req.endDate, startFormat: req.startFormat, endFormat: req.endFormat }
+        )) {
+          throw new BadRequestException('คุณมีการลางานในช่วงวันที่/เวลานี้อยู่แล้ว ไม่สามารถแก้ไขคำขอลาให้ซ้ำซ้อนได้');
+        }
+      }
+      // -------------------------
+
       const pendingLeave = await this.prisma.leaveRequest.aggregate({
         where: {
           employeeId: employee.id,

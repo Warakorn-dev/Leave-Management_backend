@@ -187,6 +187,13 @@ export class HrController {
     return this.hrService.processLeaveRequest(req.user.id, id, action, { comment });
   }
 
+  @Patch('leaves/:id/view')
+  @ApiOperation({ summary: 'Mark a leave request as viewed by HR' })
+  markAsViewed(@Request() req: any, @Param('id') id: string, @Query('lock') lock?: string) {
+    const shouldLock = lock !== 'false';
+    return this.hrService.markAsViewed(req.user.id, id, shouldLock);
+  }
+
   // --- Public Holidays ---
   @Post('holidays')
   @ApiOperation({ summary: 'Create a new public holiday' })

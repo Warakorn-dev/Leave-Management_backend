@@ -173,6 +173,32 @@ export class ManagerService {
             `เรียน ${request.employee.firstName},\n\nคำขอลา${request.leaveType.name} ของคุณ (วันที่ ${request.startDate.toLocaleDateString()} ถึง ${request.endDate.toLocaleDateString()}) ${statusText === 'ส่งต่อให้ผู้บริหารพิจารณา' ? 'กำลังรอการอนุมัติจากผู้บริหาร' : `ได้ถูก${statusText}โดยหัวหน้างานแล้ว`}\nหมายเหตุ: ${dto.comment || '-'}\n\nคุณสามารถตรวจสอบสถานะได้ในระบบ`
           );
         }
+
+        // --- Add HR Notifications ---
+        const hrs = await this.prisma.user.findMany({
+          where: { role: { name: 'HR' } }
+        });
+        for (const hr of hrs) {
+          if (hr.id) {
+            await this.prisma.notification.create({
+              data: {
+                userId: hr.id,
+                title: 'การตรวจสอบคำขอลาโดยผู้จัดการ',
+                message: `คำขอลา ${request.leaveType.name} ของ "${request.employee.firstName} ${request.employee.lastName}" ได้ถูก${statusText}โดยหัวหน้างานแล้ว`,
+                type: 'SYSTEM',
+                redirectUrl: '/dashboard/hr/leave-history',
+              }
+            });
+          }
+          if (hr.email) {
+            this.notificationService.sendEmail(
+              hr.email,
+              `[Leave Request] แจ้งเตือนการตรวจสอบคำขอลาโดยผู้จัดการ`,
+              `เรียนฝ่ายบุคคล (HR),\n\nคำขอลา${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} ได้ถูก${statusText}โดยหัวหน้างานแล้ว\nหมายเหตุ: ${dto.comment || '-'}\n\nคุณสามารถตรวจสอบรายละเอียดได้ในระบบ`
+            );
+          }
+        }
+        // ----------------------------
         
         if (nextStatus === 'PENDING_EXECUTIVE') {
           const ceos = await this.prisma.user.findMany({

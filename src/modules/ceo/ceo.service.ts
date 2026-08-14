@@ -368,10 +368,61 @@ export class CeoService {
             `เรียน ${request.employee.firstName},\n\nคำขอลา${request.leaveType.name} ของคุณ (วันที่ ${request.startDate.toLocaleDateString()} ถึง ${request.endDate.toLocaleDateString()}) ได้ถูก${statusText}โดย CEO แล้ว\nหมายเหตุ: ${comment || '-'}\n\nคุณสามารถตรวจสอบสถานะได้ในระบบ`
           );
         }
+
+        // --- Add HR Notifications ---
+        const hrs = await this.prisma.user.findMany({
+          where: { role: { name: 'HR' } }
+        });
+        for (const hr of hrs) {
+          if (hr.id) {
+            await this.prisma.notification.create({
+              data: {
+                userId: hr.id,
+                title: 'การตรวจสอบคำขอลาโดยผู้บริหาร (CEO)',
+                message: `คำขอลา ${request.leaveType.name} ของ "${request.employee.firstName} ${request.employee.lastName}" ได้ถูก${statusText}โดยผู้บริหารแล้ว`,
+                type: 'SYSTEM',
+                redirectUrl: '/dashboard/hr/leave-history',
+              }
+            });
+          }
+          if (hr.email) {
+            this.notificationService.sendEmail(
+              hr.email,
+              `[Leave Request] แจ้งเตือนการตรวจสอบคำขอลาโดยผู้บริหาร (CEO)`,
+              `เรียนฝ่ายบุคคล (HR),\n\nคำขอลา${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} ได้ถูก${statusText}โดยผู้บริหาร (CEO) แล้ว\nหมายเหตุ: ${comment || '-'}\n\nคุณสามารถตรวจสอบรายละเอียดได้ในระบบ`
+            );
+          }
+        }
+        // ----------------------------
+
       } catch (e) {
         console.error('Failed to send ceo notification', e);
       }
       return updatedRequest;
+    });
+  }
+
+  async getPendingExecutive() {
+    return this.prisma.leaveRequest.findMany({
+      where: { status: 'PENDING_EXECUTIVE' },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        employee: {
+          select: {
+            id: true,
+            employeeCode: true,
+            title: true,
+            firstName: true,
+            lastName: true,
+            department: { select: { name: true } },
+            position: { select: { name: true } },
+            user: { select: { id: true, avatarUrl: true, role: { select: { name: true } } } },
+          },
+        },
+        leaveType: true,
+        attachments: true,
+        approvals: { orderBy: { createdAt: 'asc' } },
+      },
     });
   }
 

@@ -806,8 +806,8 @@ export class HrService {
   }
   // --- Leave Verification (HR) ---
   async getPendingVerify() {
-    return this.prisma.leaveRequest.findMany({
-      where: { status: { in: ['PENDING_VERIFY', 'PENDING_CANCELLATION'] } },
+    const requests = await this.prisma.leaveRequest.findMany({
+      where: { status: { in: ['PENDING_VERIFY', 'REVIEWING_HR', 'PENDING_CANCELLATION'] } },
       orderBy: { createdAt: 'desc' },
       include: {
         employee: { 
@@ -827,6 +827,54 @@ export class HrService {
         approvals: { orderBy: { createdAt: 'desc' } }
       }
     });
+
+    const reviewerIds = [...new Set(requests.map((request) => request.currentHrReviewerId).filter(Boolean))] as string[];
+    const reviewers = reviewerIds.length
+      ? await this.prisma.user.findMany({ where: { id: { in: reviewerIds } }, select: { id: true, username: true, email: true } })
+      : [];
+    const reviewerById = new Map(reviewers.map((reviewer) => [reviewer.id, reviewer]));
+
+    return requests.map((request) => ({
+      ...request,
+      currentReviewer: request.currentHrReviewerId ? reviewerById.get(request.currentHrReviewerId) ?? null : null,
+    }));
+  }
+
+  async markAsViewed(hrUserId: string, requestId: string, lockRequest: boolean = true) {
+    const request = await this.prisma.leaveRequest.findUnique({ where: { id: requestId } });
+    if (!request) {
+      throw new BadRequestException('Request not found');
+    }
+    if (request.status === 'PENDING_CANCELLATION') {
+      return this.prisma.leaveRequest.update({ where: { id: requestId }, data: { isViewedByHr: true } });
+    }
+    if (!['PENDING_VERIFY', 'REVIEWING_HR'].includes(request.status)) {
+      throw new BadRequestException('This request is no longer waiting for HR review');
+    }
+
+    if (lockRequest) {
+      if (request.currentHrReviewerId && request.currentHrReviewerId !== hrUserId) {
+        throw new BadRequestException('คำขอนี้กำลังถูกตรวจสอบโดย HR คนอื่น');
+      }
+
+      // updateMany makes acquisition atomic: only the first HR can change a waiting request.
+      const acquired = await this.prisma.leaveRequest.updateMany({
+        where: { id: requestId, status: 'PENDING_VERIFY', currentHrReviewerId: null },
+        data: { isViewedByHr: true, status: 'REVIEWING_HR', currentHrReviewerId: hrUserId, hrReviewStartedAt: new Date() },
+      });
+      
+      if (acquired.count === 0 && request.currentHrReviewerId !== hrUserId) {
+        // If we couldn't acquire it, it means another HR just took it.
+        throw new BadRequestException('คำขอนี้กำลังถูกตรวจสอบโดย HR คนอื่น');
+      }
+    } else {
+      await this.prisma.leaveRequest.update({
+        where: { id: requestId },
+        data: { isViewedByHr: true }
+      });
+    }
+
+    return this.prisma.leaveRequest.findUnique({ where: { id: requestId } });
   }
 
   async processLeaveRequest(hrUserId: string, requestId: string, action: 'Approve' | 'Reject', dto: { comment?: string }) {
@@ -835,12 +883,28 @@ export class HrService {
       include: { leaveType: true, employee: { include: { user: { include: { role: true } } } } }
     });
 
-    if (!request || !['PENDING_VERIFY', 'PENDING_CANCELLATION'].includes(request.status)) {
+    if (!request || !['PENDING_VERIFY', 'REVIEWING_HR', 'PENDING_CANCELLATION'].includes(request.status)) {
       throw new BadRequestException('Invalid request or already verified');
+    }
+
+    if (request.status === 'REVIEWING_HR' && request.currentHrReviewerId !== hrUserId) {
+      throw new BadRequestException('คำขอนี้กำลังถูกตรวจสอบโดย HR คนอื่น');
     }
 
     if (action === 'Reject' && !dto.comment?.trim()) {
       throw new BadRequestException('A rejection reason is required');
+    }
+
+    // The normal UI acquires the lock when an HR user opens the request.  Keep
+    // the decision endpoint safe too, so a direct API call cannot bypass it.
+    if (request.status === 'PENDING_VERIFY') {
+      const acquired = await this.prisma.leaveRequest.updateMany({
+        where: { id: requestId, status: 'PENDING_VERIFY', currentHrReviewerId: null },
+        data: { status: 'REVIEWING_HR', currentHrReviewerId: hrUserId, hrReviewStartedAt: new Date() },
+      });
+      if (acquired.count !== 1) {
+        throw new BadRequestException('คำขอนี้กำลังถูกตรวจสอบโดย HR คนอื่น');
+      }
     }
 
     if (request.status === 'PENDING_CANCELLATION') {
@@ -937,7 +1001,7 @@ export class HrService {
     return this.prisma.$transaction(async (prisma) => {
       const updatedRequest = await prisma.leaveRequest.update({
         where: { id: requestId },
-        data: { status: nextStatus },
+        data: { status: nextStatus, currentHrReviewerId: null, hrReviewStartedAt: null },
       });
 
       await prisma.leaveApproval.create({

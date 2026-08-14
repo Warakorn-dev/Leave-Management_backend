@@ -38,6 +38,12 @@ export class CeoController {
     return this.ceoService.getDepartmentReport(departmentId);
   }
 
+  @Get('pending')
+  @ApiOperation({ summary: 'Get pending executive leave requests (PENDING_EXECUTIVE)' })
+  getPendingExecutive() {
+    return this.ceoService.getPendingExecutive();
+  }
+
   @Put('approve/:id')
   @ApiOperation({ summary: 'CEO approve special leave request' })
   approveSpecialLeave(
