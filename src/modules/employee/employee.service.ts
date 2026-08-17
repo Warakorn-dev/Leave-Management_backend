@@ -445,14 +445,17 @@ export class EmployeeService {
       throw new ForbiddenException('You do not have permission to update this leave request');
     }
     
-    const allowedStatuses = ['PENDING_VERIFY', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE', 'REJECTED', 'Pending', 'Waiting CEO', 'Rejected'];
+    const allowedStatuses = ['PENDING_VERIFY', 'REVIEWING_HR'];
     if (!allowedStatuses.includes(request.status)) {
-      throw new ForbiddenException('Can only update pending or rejected leave requests');
+      throw new ForbiddenException('สามารถแก้ไขข้อมูลได้เฉพาะคำขอที่ยังไม่ผ่านการตรวจสอบจาก HR เท่านั้น');
     }
 
     const dataToUpdate: any = { ...dto };
-    if (request.status.toUpperCase() === 'REJECTED') {
-      dataToUpdate.status = ['Manager', 'HR'].includes(employee.user?.role?.name) ? 'PENDING_EXECUTIVE' : 'PENDING_VERIFY';
+    if (request.status === 'REVIEWING_HR') {
+      dataToUpdate.status = 'PENDING_VERIFY';
+      dataToUpdate.isViewedByHr = false;
+      dataToUpdate.currentHrReviewerId = null;
+      dataToUpdate.hrReviewStartedAt = null;
     }
     
     let newStartDate: Date;

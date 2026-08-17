@@ -10,7 +10,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 @ApiTags('Manager Leave Processing Module')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('Manager', 'CEO')
+@Roles('Manager', 'CEO', 'HR')
 @Controller('manager')
 export class ManagerController {
   constructor(private readonly managerService: ManagerService) {}

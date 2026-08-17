@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsInt, IsBoolean } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsInt, IsBoolean, IsNumber } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 // Department DTOs
@@ -362,7 +362,13 @@ export class UpdatePublicHolidayDto {
 
 // LeaveBalance DTOs
 export class UpdateLeaveBalanceDto {
-  @ApiProperty()
-  @IsInt()
-  remainingDays: number;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  remainingDays?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  totalDays?: number;
 }

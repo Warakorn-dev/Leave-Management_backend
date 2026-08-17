@@ -792,15 +792,19 @@ export class HrService {
       throw new NotFoundException('Leave balance not found');
     }
 
-    if (dto.remainingDays < 0 || dto.remainingDays > balance.totalDays) {
-      throw new BadRequestException(`Remaining leave balance must be between 0 and ${balance.totalDays}`);
+    const newTotalDays = dto.totalDays !== undefined ? dto.totalDays : balance.totalDays;
+    const newRemainingDays = dto.remainingDays !== undefined ? dto.remainingDays : balance.remainingDays;
+
+    if (newRemainingDays < 0 || newRemainingDays > newTotalDays) {
+      throw new BadRequestException(`Remaining leave balance must be between 0 and ${newTotalDays}`);
     }
 
     return this.prisma.leaveBalance.update({
       where: { id },
       data: {
-        remainingDays: dto.remainingDays,
-        usedDays: balance.totalDays - dto.remainingDays,
+        totalDays: newTotalDays,
+        remainingDays: newRemainingDays,
+        usedDays: newTotalDays - newRemainingDays,
       }
     });
   }
@@ -855,6 +859,18 @@ export class HrService {
     if (lockRequest) {
       if (request.currentHrReviewerId && request.currentHrReviewerId !== hrUserId) {
         throw new BadRequestException('คำขอนี้กำลังถูกตรวจสอบโดย HR คนอื่น');
+      }
+
+      // Check if this HR user has already locked any other request
+      const existingLocked = await this.prisma.leaveRequest.findFirst({
+        where: {
+          currentHrReviewerId: hrUserId,
+          status: 'REVIEWING_HR',
+          id: { not: requestId }
+        }
+      });
+      if (existingLocked) {
+        throw new BadRequestException('คุณมีรายการคำขออื่นที่กำลังตรวจสอบอยู่ กรุณาจัดการรายการนั้นให้เสร็จสิ้นก่อนดึงคำขอใหม่');
       }
 
       // updateMany makes acquisition atomic: only the first HR can change a waiting request.

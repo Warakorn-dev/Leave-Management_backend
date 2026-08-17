@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ProcessLeaveRequestDto } from './dto/manager.dto';
 import { NotificationService } from '../notification/notification.service';
@@ -233,8 +233,20 @@ export class ManagerService {
   }
 
   private async getEmployeeByUserId(userId: string) {
-    const employee = await this.prisma.employee.findUnique({ where: { userId } });
+    const employee = await this.prisma.employee.findUnique({
+      where: { userId },
+      include: { position: true, user: { include: { role: true } } },
+    });
     if (!employee) throw new NotFoundException('Manager profile not found');
+
+    const roleName = employee.user?.role?.name;
+    if (roleName === 'HR') {
+      const posName = employee.position?.name || '';
+      const isLeader = posName.toLowerCase().includes('leader') || posName.toLowerCase().includes('manager');
+      if (!isLeader) {
+        throw new ForbiddenException('Only HR department heads can access manager approval functions');
+      }
+    }
     return employee;
   }
 
