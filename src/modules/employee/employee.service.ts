@@ -155,7 +155,7 @@ export class EmployeeService {
       where: {
         employeeId: employee.id,
         leaveTypeId: dto.leaveTypeId,
-        status: { in: ['Pending', 'Waiting CEO'] },
+        status: { in: ['PENDING_VERIFY', 'REVIEWING_HR', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'] },
         startDate: { gte: new Date(`${currentYear}-01-01T00:00:00.000Z`) }
       },
       _sum: { totalDays: true }
@@ -169,6 +169,10 @@ export class EmployeeService {
 
     if (calculatedDays <= 0) {
       throw new BadRequestException('จำนวนวันลาเป็น 0 (อาจตรงกับวันหยุดหรือเสาร์-อาทิตย์) กรุณาเลือกวันใหม่อีกครั้ง');
+    }
+
+    if (effectiveRemainingDays < calculatedDays) {
+      throw new BadRequestException(`สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`);
     }
 
     // --- OVERLAP VALIDATION ---
@@ -248,9 +252,6 @@ export class EmployeeService {
       if (workDurationMs < msInYear) {
         throw new BadRequestException('คุณต้องมีอายุงานครบ 1 ปี จึงจะสามารถใช้สิทธิลาพักผ่อนประจำปีได้');
       }
-      if (effectiveRemainingDays < calculatedDays) {
-        throw new BadRequestException(`สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`);
-      }
       paidDays = calculatedDays;
     } 
     // 4. ลาเพื่อทำหมัน
@@ -260,9 +261,6 @@ export class EmployeeService {
     }
     // Other leaves (ลากิจ และอื่นๆ)
     else {
-      if (effectiveRemainingDays < calculatedDays) {
-        throw new BadRequestException(`สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`);
-      }
       paidDays = calculatedDays;
     }
 
@@ -583,7 +581,7 @@ export class EmployeeService {
         where: {
           employeeId: employee.id,
           leaveTypeId: request.leaveTypeId,
-          status: { in: ['PENDING_VERIFY', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'] },
+          status: { in: ['PENDING_VERIFY', 'REVIEWING_HR', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'] },
           startDate: { gte: new Date(`${currentYear}-01-01T00:00:00.000Z`) },
           id: { not: requestId }
         },
@@ -591,6 +589,10 @@ export class EmployeeService {
       });
       const pendingDays = pendingLeave._sum.totalDays || 0;
       const effectiveRemainingDays = balance.remainingDays - pendingDays;
+
+      if (effectiveRemainingDays < calculatedDays) {
+        throw new BadRequestException(`สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`);
+      }
 
       let paidDays = calculatedDays;
       let unpaidDays = 0;
@@ -651,9 +653,6 @@ export class EmployeeService {
         if (workDurationMs < msInYear) {
           throw new BadRequestException('คุณต้องมีอายุงานครบ 1 ปี จึงจะสามารถใช้สิทธิลาพักผ่อนประจำปีได้');
         }
-        if (effectiveRemainingDays < calculatedDays) {
-          throw new BadRequestException(`สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`);
-        }
         paidDays = calculatedDays;
       } 
       // 5. ลาเพื่อทำหมัน
@@ -663,9 +662,6 @@ export class EmployeeService {
       }
       // Other leaves
       else {
-        if (effectiveRemainingDays < calculatedDays) {
-          throw new BadRequestException(`สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`);
-        }
         paidDays = calculatedDays;
       }
       
@@ -915,7 +911,7 @@ export class EmployeeService {
       by: ['leaveTypeId'],
       where: {
         employeeId: employee.id,
-        status: { in: ['Pending', 'Waiting CEO'] },
+        status: { in: ['PENDING_VERIFY', 'REVIEWING_HR', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'] },
         startDate: { gte: new Date(`${currentYear}-01-01T00:00:00.000Z`) }
       },
       _sum: { totalDays: true }
@@ -952,7 +948,7 @@ export class EmployeeService {
     const pendingApprovals = await this.prisma.leaveRequest.count({
       where: {
         employeeId: employee.id,
-        status: { in: ['Pending', 'Waiting CEO'] }
+        status: { in: ['PENDING_VERIFY', 'REVIEWING_HR', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'] }
       }
     });
 
