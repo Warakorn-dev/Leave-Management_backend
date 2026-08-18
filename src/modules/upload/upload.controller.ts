@@ -34,40 +34,73 @@ export class UploadController {
   @UseInterceptors(FileInterceptor('file'))
   async uploadFile(@UploadedFile() file: Express.Multer.File, @Body('leaveRequestId') leaveRequestId: string) {
     if (!file) {
-      throw new BadRequestException('File is required');
+      throw new BadRequestException('กรุณาเลือกไฟล์ก่อนอัปโหลด');
     }
     if (!leaveRequestId) {
-      throw new BadRequestException('leaveRequestId is required');
+      throw new BadRequestException('ไม่พบรหัสคำขอลา (leaveRequestId)');
     }
 
-    // Delete existing attachments to prevent orphaned files
-    await this.prisma.leaveAttachment.deleteMany({
-      where: {
-        leaveRequestId,
-      },
+    // Verify leave request exists
+    const leaveRequest = await this.prisma.leaveRequest.findUnique({
+      where: { id: leaveRequestId },
     });
-
-    let base64Data = '';
-    if (file.buffer) {
-      base64Data = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
-    } else if (file.path && fs.existsSync(file.path)) {
-      const fileBuffer = fs.readFileSync(file.path);
-      base64Data = `data:${file.mimetype};base64,${fileBuffer.toString('base64')}`;
-      try { fs.unlinkSync(file.path); } catch (e) {}
-    }
-
-    const attachment = await this.prisma.leaveAttachment.create({
-      data: {
-        leaveRequestId,
-        filePath: base64Data || `/${file.path.replace(/\\/g, '/')}`,
-        fileType: file.mimetype,
+    if (!leaveRequest) {
+      // Clean up uploaded temp file
+      if (file.path && fs.existsSync(file.path)) {
+        try { fs.unlinkSync(file.path); } catch (e) {}
       }
-    });
+      throw new BadRequestException('ไม่พบคำขอลาที่ต้องการแนบไฟล์');
+    }
 
-    return {
-      message: 'File uploaded and saved to database successfully',
-      attachment
-    };
+    try {
+      // Delete existing attachments to prevent orphaned data
+      await this.prisma.leaveAttachment.deleteMany({
+        where: { leaveRequestId },
+      });
+
+      let base64Data = '';
+
+      if (file.buffer) {
+        // memoryStorage: file content is in buffer
+        base64Data = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+      } else if (file.path && fs.existsSync(file.path)) {
+        // diskStorage: file content is on disk
+        const fileBuffer = fs.readFileSync(file.path);
+        base64Data = `data:${file.mimetype};base64,${fileBuffer.toString('base64')}`;
+        // Clean up temp file after reading
+        try { fs.unlinkSync(file.path); } catch (e) {}
+      }
+
+      if (!base64Data) {
+        throw new BadRequestException('ไม่สามารถอ่านไฟล์ได้ กรุณาลองใหม่อีกครั้ง');
+      }
+
+      const attachment = await this.prisma.leaveAttachment.create({
+        data: {
+          leaveRequestId,
+          filePath: base64Data,
+          fileType: file.mimetype,
+        }
+      });
+
+      return {
+        message: 'อัปโหลดไฟล์สำเร็จ',
+        attachment
+      };
+    } catch (error) {
+      // Clean up temp file on error
+      if (file.path && fs.existsSync(file.path)) {
+        try { fs.unlinkSync(file.path); } catch (e) {}
+      }
+
+      // Re-throw if it's already an HttpException (BadRequestException etc.)
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
+      console.error('Upload error:', error);
+      throw new BadRequestException('เกิดข้อผิดพลาดในการอัปโหลดไฟล์ กรุณาลองใหม่อีกครั้ง');
+    }
   }
 
   @Post('avatar')

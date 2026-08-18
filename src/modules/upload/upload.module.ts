@@ -12,7 +12,7 @@ import * as fs from 'fs';
         destination: (req, file, cb) => {
           const uploadPath = './uploads';
           if (!fs.existsSync(uploadPath)) {
-            fs.mkdirSync(uploadPath);
+            fs.mkdirSync(uploadPath, { recursive: true });
           }
           cb(null, uploadPath);
         },
@@ -22,13 +22,13 @@ import * as fs from 'fs';
         },
       }),
       fileFilter: (req, file, cb) => {
-        if (!file.originalname.match(/\.(pdf|doc|docx|png|jpeg|jpg)$/)) {
-          return cb(new Error('Only PDF, DOCX, PNG, JPG files are allowed!'), false);
+        if (!file.originalname.match(/\.(pdf|doc|docx|png|jpeg|jpg)$/i)) {
+          return cb(new Error('ไม่รองรับประเภทไฟล์นี้ (รองรับเฉพาะ PDF, DOCX, PNG, JPG)'), false);
         }
         cb(null, true);
       },
       limits: {
-        fileSize: 5 * 1024 * 1024, // 5MB limit
+        fileSize: 10 * 1024 * 1024, // 10MB limit
       },
     }),
   ],
