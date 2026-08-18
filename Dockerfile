@@ -8,7 +8,7 @@ COPY package*.json ./
 COPY prisma ./prisma/
 
 # Install app dependencies
-RUN npm install
+RUN npm ci
 
 # Copy the rest of the application source code
 COPY . .
@@ -22,12 +22,13 @@ RUN npm run build
 FROM node:20-alpine
 
 WORKDIR /app
+ENV NODE_ENV=production
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 
-EXPOSE 3000
+EXPOSE 8000
 
 CMD ["npm", "run", "start:prod"]

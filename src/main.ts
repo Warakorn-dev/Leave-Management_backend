@@ -11,12 +11,44 @@ import { join } from 'path';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const configService = app.get(ConfigService);
+  const isProduction = process.env.NODE_ENV === 'production';
+  const jwtSecret = configService.get<string>('jwt.secret');
+  const jwtRefreshSecret = configService.get<string>('jwt.refreshSecret');
+
+  if (!jwtSecret || !jwtRefreshSecret) {
+    throw new Error('JWT_SECRET and JWT_REFRESH_SECRET must be configured.');
+  }
+
+  const configuredOrigins = configService.get<string>('corsOrigins');
+  if (isProduction && !configuredOrigins) {
+    throw new Error(
+      'CORS_ORIGINS or FRONTEND_URL must be configured in production.',
+    );
+  }
+  const allowedOrigins = (
+    configuredOrigins || 'http://localhost:3000,http://127.0.0.1:3000'
+  )
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
   // Security
-  app.use(helmet({
-    crossOriginResourcePolicy: { policy: "cross-origin" }
-  }));
-  app.enableCors();
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
+  app.enableCors({
+    credentials: true,
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error('Origin is not allowed by CORS'));
+    },
+  });
 
   // Serve static files
   app.useStaticAssets(join(process.cwd(), 'uploads'), {
@@ -50,12 +82,14 @@ async function bootstrap() {
   SwaggerModule.setup('api-docs', app, document);
 
   // Start Server
-  const configService = app.get(ConfigService);
   const port = configService.get<number>('port') || 8000;
   await app.listen(port, '0.0.0.0');
   console.log(`Application is running on: http://localhost:${port}/api`);
 }
-bootstrap();
+void bootstrap().catch((error: unknown) => {
+  console.error('Failed to start application', error);
+  process.exitCode = 1;
+});
 // Trigger restart for new port
 // restart
 
