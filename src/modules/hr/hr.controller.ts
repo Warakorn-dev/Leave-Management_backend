@@ -1,10 +1,35 @@
-import { Controller, Get, Post, Body, Put, Patch, Param, Delete, UseGuards, Request, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Put,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+  Request,
+  Query,
+} from '@nestjs/common';
 import { HrService } from './hr.service';
-import { CreateDepartmentDto, UpdateDepartmentDto, CreatePositionDto, UpdatePositionDto, CreateLeaveTypeDto, UpdateLeaveTypeDto, CreateEmployeeDto, UpdateEmployeeDto, CreatePublicHolidayDto, UpdatePublicHolidayDto, UpdateLeaveBalanceDto } from './dto/hr.dto';
+import {
+  CreateDepartmentDto,
+  UpdateDepartmentDto,
+  CreatePositionDto,
+  UpdatePositionDto,
+  CreateLeaveTypeDto,
+  UpdateLeaveTypeDto,
+  CreateEmployeeDto,
+  UpdateEmployeeDto,
+  CreatePublicHolidayDto,
+  UpdatePublicHolidayDto,
+  UpdateLeaveBalanceDto,
+} from './dto/hr.dto';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 @ApiTags('HR Module')
 @ApiBearerAuth()
@@ -17,7 +42,10 @@ export class HrController {
   @Get('dashboard')
   @ApiOperation({ summary: 'Get HR dashboard statistics' })
   getDashboardStats(@Request() req: any, @Query('year') year?: string) {
-    return this.hrService.getDashboardStats(req.user.id, year ? parseInt(year) : undefined);
+    return this.hrService.getDashboardStats(
+      req.user.id,
+      year ? parseInt(year) : undefined,
+    );
   }
 
   @Get('leave-summary')
@@ -27,9 +55,15 @@ export class HrController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Query('leaveTypeId') leaveTypeId?: string,
-    @Query('status') status?: string
+    @Query('status') status?: string,
   ) {
-    return this.hrService.getLeaveSummary({ searchQuery, startDate, endDate, leaveTypeId, status });
+    return this.hrService.getLeaveSummary({
+      searchQuery,
+      startDate,
+      endDate,
+      leaveTypeId,
+      status,
+    });
   }
 
   // --- Departments ---
@@ -129,41 +163,56 @@ export class HrController {
 
   @Get('employees/:id')
   @ApiOperation({ summary: 'Get employee by id' })
-  findEmployeeById(@Param('id') id: string) {
-    return this.hrService.findEmployeeById(id);
+  findEmployeeById(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.hrService.findEmployeeById(user, id);
   }
 
   @Patch('employees/:id')
   @ApiOperation({ summary: 'Update an employee' })
-  async updateEmployee(@Param('id') id: string, @Body() dto: UpdateEmployeeDto) {
+  async updateEmployee(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateEmployeeDto,
+  ) {
     try {
-      return await this.hrService.updateEmployee(id, dto);
-    } catch (err) {
-      require('fs').writeFileSync('debug-error.log', err.stack || err.message || String(err));
+      return await this.hrService.updateEmployee(user, id, dto);
+    } catch (err: any) {
+      require('fs').writeFileSync(
+        'debug-error.log',
+        err.stack || err.message || String(err),
+      );
       throw err;
     }
   }
 
   @Patch('employees/:id/status')
   @ApiOperation({ summary: 'Update employee status (active/inactive)' })
-  updateEmployeeStatus(@Param('id') id: string, @Body('isActive') isActive: boolean) {
-    return this.hrService.updateEmployeeStatus(id, isActive);
+  updateEmployeeStatus(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body('isActive') isActive: boolean,
+  ) {
+    return this.hrService.updateEmployeeStatus(user, id, isActive);
   }
 
   @Delete('employees/:id')
   @ApiOperation({ summary: 'Delete an employee (and their user account)' })
-  deleteEmployee(@Param('id') id: string) {
-    return this.hrService.deleteEmployee(id);
+  deleteEmployee(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.hrService.deleteEmployee(user, id);
   }
 
   @Post('employees/:id/initialize-leave-balances')
-  @ApiOperation({ summary: 'Initialize leave balances for an employee for the current year' })
+  @ApiOperation({
+    summary: 'Initialize leave balances for an employee for the current year',
+  })
   initializeLeaveBalances(@Param('id') id: string) {
     return this.hrService.initializeLeaveBalances(id);
   }
 
   @Post('employees/:id/reset-leave-balances')
-  @ApiOperation({ summary: 'Reset leave balances for an employee (set usedDays to 0)' })
+  @ApiOperation({
+    summary: 'Reset leave balances for an employee (set usedDays to 0)',
+  })
   resetLeaveBalances(@Param('id') id: string) {
     return this.hrService.resetLeaveBalances(id);
   }
@@ -187,14 +236,20 @@ export class HrController {
     @Request() req: any,
     @Param('id') id: string,
     @Body('action') action: 'Approve' | 'Reject',
-    @Body('comment') comment?: string
+    @Body('comment') comment?: string,
   ) {
-    return this.hrService.processLeaveRequest(req.user.id, id, action, { comment });
+    return this.hrService.processLeaveRequest(req.user.id, id, action, {
+      comment,
+    });
   }
 
   @Patch('leaves/:id/view')
   @ApiOperation({ summary: 'Mark a leave request as viewed by HR' })
-  markAsViewed(@Request() req: any, @Param('id') id: string, @Query('lock') lock?: string) {
+  markAsViewed(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Query('lock') lock?: string,
+  ) {
     const shouldLock = lock !== 'false';
     return this.hrService.markAsViewed(req.user.id, id, shouldLock);
   }
@@ -227,7 +282,10 @@ export class HrController {
   // --- Leave Balance Adjustment ---
   @Put('leave-balances/:id')
   @ApiOperation({ summary: 'Manually adjust an employee leave balance' })
-  updateLeaveBalance(@Param('id') id: string, @Body() dto: UpdateLeaveBalanceDto) {
+  updateLeaveBalance(
+    @Param('id') id: string,
+    @Body() dto: UpdateLeaveBalanceDto,
+  ) {
     return this.hrService.updateLeaveBalance(id, dto);
   }
 }

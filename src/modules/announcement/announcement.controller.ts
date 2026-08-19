@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Body, Query, Param, Patch, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Query,
+  Param,
+  Patch,
+  Delete,
+} from '@nestjs/common';
 import { AnnouncementService } from './announcement.service';
 
 @Controller('announcement')
@@ -17,7 +26,9 @@ export class AnnouncementController {
   }
 
   @Post()
-  async createAnnouncement(@Body() body: { title: string; subtitle: string; isImportant: boolean }) {
+  async createAnnouncement(
+    @Body() body: { title: string; subtitle: string; isImportant: boolean },
+  ) {
     try {
       const announcement = await this.announcementService.create(body);
       return { success: true, data: announcement };
@@ -27,7 +38,10 @@ export class AnnouncementController {
   }
 
   @Patch(':id')
-  async updateAnnouncement(@Param('id') id: string, @Body() body: { title?: string; subtitle?: string; isImportant?: boolean }) {
+  async updateAnnouncement(
+    @Param('id') id: string,
+    @Body() body: { title?: string; subtitle?: string; isImportant?: boolean },
+  ) {
     try {
       const announcement = await this.announcementService.update(id, body);
       return { success: true, data: announcement };

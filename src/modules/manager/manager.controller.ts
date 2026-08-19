@@ -1,4 +1,12 @@
-import { Controller, Get, Put, Body, Param, UseGuards, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Put,
+  Body,
+  Param,
+  UseGuards,
+  Query,
+} from '@nestjs/common';
 import { ManagerService } from './manager.service';
 import { ProcessLeaveRequestDto } from './dto/manager.dto';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -18,7 +26,10 @@ export class ManagerController {
   @Get('dashboard')
   @ApiOperation({ summary: 'Get manager dashboard statistics' })
   getDashboardStats(@CurrentUser() user: any, @Query('year') year?: string) {
-    return this.managerService.getDashboardStats(user.id, year ? parseInt(year) : undefined);
+    return this.managerService.getDashboardStats(
+      user.id,
+      year ? parseInt(year) : undefined,
+    );
   }
 
   @Get('pending')

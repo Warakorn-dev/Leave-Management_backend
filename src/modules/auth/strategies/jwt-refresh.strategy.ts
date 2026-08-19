@@ -6,7 +6,10 @@ import { Request } from 'express';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
-export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh') {
+export class JwtRefreshStrategy extends PassportStrategy(
+  Strategy,
+  'jwt-refresh',
+) {
   constructor(
     private configService: ConfigService,
     private prisma: PrismaService,
@@ -14,7 +17,8 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('jwt.refreshSecret') || 'defaultRefresh',
+      secretOrKey:
+        configService.get<string>('jwt.refreshSecret') || 'defaultRefresh',
       passReqToCallback: true,
     });
   }
@@ -25,11 +29,16 @@ export class JwtRefreshStrategy extends PassportStrategy(Strategy, 'jwt-refresh'
       where: { id: payload.sub },
       include: { role: true },
     });
-    
+
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
-    
-    return { id: user.id, email: user.email, role: user.role.name, refreshToken };
+
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role.name,
+      refreshToken,
+    };
   }
 }

@@ -27,7 +27,7 @@ export class ExportService {
       { header: 'Status', key: 'status', width: 15 },
     ];
 
-    leaves.forEach(leave => {
+    leaves.forEach((leave) => {
       worksheet.addRow({
         id: leave.id,
         employeeName: `${leave.employee.firstName} ${leave.employee.lastName}`,
@@ -38,8 +38,14 @@ export class ExportService {
       });
     });
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename=leave_report.xlsx');
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=leave_report.xlsx',
+    );
 
     return workbook.xlsx.write(res).then(() => {
       res.status(200).end();
@@ -53,7 +59,10 @@ export class ExportService {
 
     const doc = new PDFDocument({ margin: 40 });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename=leave_report.pdf');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=leave_report.pdf',
+    );
 
     doc.pipe(res);
 
@@ -62,17 +71,26 @@ export class ExportService {
       doc.font(fontPath);
     }
 
-    doc.fontSize(18).text('รายงานการลางาน (Leave Management Report)', { align: 'center' });
+    doc
+      .fontSize(18)
+      .text('รายงานการลางาน (Leave Management Report)', { align: 'center' });
     doc.moveDown(1.5);
 
     leaves.forEach((leave, i) => {
-      const empName = leave.employee ? `${leave.employee.firstName} ${leave.employee.lastName}` : 'พนักงาน';
+      const empName = leave.employee
+        ? `${leave.employee.firstName} ${leave.employee.lastName}`
+        : 'พนักงาน';
       const leaveName = leave.leaveType?.name || 'ลางาน';
       const startDateStr = leave.startDate.toISOString().split('T')[0];
       const endDateStr = leave.endDate.toISOString().split('T')[0];
 
       doc.fontSize(12).text(`${i + 1}. ${empName} - ${leaveName}`);
-      doc.fontSize(10).fillColor('#4B5563').text(`   วันที่: ${startDateStr} ถึง ${endDateStr} (${leave.totalDays} วัน) | สถานะ: ${leave.status}`);
+      doc
+        .fontSize(10)
+        .fillColor('#4B5563')
+        .text(
+          `   วันที่: ${startDateStr} ถึง ${endDateStr} (${leave.totalDays} วัน) | สถานะ: ${leave.status}`,
+        );
       doc.fillColor('#000000');
       doc.moveDown(0.8);
     });

@@ -23,10 +23,12 @@ import { AnnouncementModule } from './modules/announcement/announcement.module';
       isGlobal: true,
       load: [configuration],
     }),
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 1000,
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 1000,
+      },
+    ]),
     ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
