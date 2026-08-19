@@ -264,7 +264,7 @@ export class ManagerService {
       }),
       this.prisma.leaveRequest.count({ 
         where: { 
-          status: 'Pending',
+          status: 'PENDING_SUPERVISOR',
           employee: { departmentId: manager.departmentId }
         } 
       }),
@@ -279,7 +279,7 @@ export class ManagerService {
 
     const leavesTodayCount = await this.prisma.leaveRequest.count({
       where: {
-        status: { contains: 'Approved' },
+        status: 'APPROVED',
         startDate: { lte: tomorrow },
         endDate: { gte: today },
         employee: { departmentId: manager.departmentId }
@@ -288,7 +288,7 @@ export class ManagerService {
 
     const monthlyStatsRaw = await this.prisma.leaveRequest.findMany({
       where: {
-        status: { contains: 'Approved' },
+        status: 'APPROVED',
         startDate: {
           gte: new Date(`${currentYear}-01-01`),
           lt: new Date(`${currentYear + 1}-01-01`)
@@ -327,7 +327,7 @@ export class ManagerService {
       activities: activities.map(req => {
         let type = 'leave';
         let title = `${req.employee?.firstName || 'พนักงาน'} ส่งคำขอลา${req.leaveType?.name || 'ลา'} ${req.totalDays || 1} วัน`;
-        if (req.status === 'Approved') {
+        if (req.status?.toUpperCase() === 'APPROVED') {
           type = 'approve';
           title = `หัวหน้าอนุมัติการลาของ ${req.employee?.firstName || 'พนักงาน'}`;
         }
