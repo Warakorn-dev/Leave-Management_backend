@@ -54,7 +54,7 @@ export class NotificationService {
     let list = await this.prisma.notification.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
-      take: 10,
+      take: 20,
     });
 
     // Auto fix any existing old notification text in DB
@@ -192,7 +192,7 @@ export class NotificationService {
       list = await this.prisma.notification.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
-        take: 10,
+        take: 20,
       });
     }
 
