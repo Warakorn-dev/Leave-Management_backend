@@ -135,8 +135,13 @@ export class HrController {
 
   @Patch('employees/:id')
   @ApiOperation({ summary: 'Update an employee' })
-  updateEmployee(@Param('id') id: string, @Body() dto: UpdateEmployeeDto) {
-    return this.hrService.updateEmployee(id, dto);
+  async updateEmployee(@Param('id') id: string, @Body() dto: UpdateEmployeeDto) {
+    try {
+      return await this.hrService.updateEmployee(id, dto);
+    } catch (err) {
+      require('fs').writeFileSync('debug-error.log', err.stack || err.message || String(err));
+      throw err;
+    }
   }
 
   @Patch('employees/:id/status')

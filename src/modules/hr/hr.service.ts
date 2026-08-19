@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateDepartmentDto, UpdateDepartmentDto, CreatePositionDto, UpdatePositionDto, CreateLeaveTypeDto, UpdateLeaveTypeDto, CreateEmployeeDto, UpdateEmployeeDto, CreatePublicHolidayDto, UpdatePublicHolidayDto, UpdateLeaveBalanceDto } from './dto/hr.dto';
 import * as bcrypt from 'bcrypt';
@@ -294,14 +294,41 @@ export class HrService {
       }
 
       if (dto.email || dto.username || updatedRoleId) {
-        await prisma.user.update({
-          where: { id: employee.userId },
-          data: {
-            ...(dto.email ? { email: dto.email } : {}),
-            ...(dto.username ? { username: dto.username } : {}),
-            ...(updatedRoleId ? { roleId: updatedRoleId } : {})
+        if (dto.email) {
+          const existingUserByEmail = await prisma.user.findUnique({
+            where: { email: dto.email.trim() },
+            select: { id: true },
+          });
+          if (existingUserByEmail && existingUserByEmail.id !== employee.userId) {
+            throw new ConflictException('อีเมลนี้ถูกใช้งานโดยผู้ใช้อื่นแล้ว');
           }
-        });
+        }
+
+        if (dto.username) {
+          const existingUserByUsername = await prisma.user.findUnique({
+            where: { username: dto.username.trim() },
+            select: { id: true },
+          });
+          if (existingUserByUsername && existingUserByUsername.id !== employee.userId) {
+            throw new ConflictException('ชื่อผู้ใช้นี้ถูกใช้งานโดยผู้ใช้อื่นแล้ว');
+          }
+        }
+
+        try {
+          await prisma.user.update({
+            where: { id: employee.userId },
+            data: {
+              ...(dto.email ? { email: dto.email.trim() } : {}),
+              ...(dto.username ? { username: dto.username.trim() } : {}),
+              ...(updatedRoleId ? { roleId: updatedRoleId } : {})
+            }
+          });
+        } catch (error: any) {
+          if (error.code === 'P2002') {
+            throw new ConflictException('อีเมลหรือชื่อผู้ใช้นี้ถูกใช้งานโดยผู้ใช้อื่นแล้ว');
+          }
+          throw error;
+        }
       }
 
       return prisma.employee.update({
@@ -313,8 +340,8 @@ export class HrService {
           lastName: dto.lastName !== undefined ? dto.lastName : undefined,
           gender: dto.gender !== undefined ? dto.gender : undefined,
           phone: dto.phone !== undefined ? dto.phone : undefined,
-          departmentId: dto.departmentId !== undefined ? dto.departmentId : undefined,
-          positionId: dto.positionId !== undefined ? dto.positionId : undefined,
+          departmentId: dto.departmentId || undefined,
+          positionId: dto.positionId || undefined,
           hireDate: dto.hireDate ? new Date(dto.hireDate) : undefined,
           firstNameEN: dto.firstNameEN !== undefined ? dto.firstNameEN : undefined,
           lastNameEN: dto.lastNameEN !== undefined ? dto.lastNameEN : undefined,
