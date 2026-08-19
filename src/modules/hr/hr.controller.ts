@@ -30,6 +30,10 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/interfaces/authenticated-user.interface';
+import { Request as ExpressRequest } from 'express';
+
+type AuthenticatedRequest = ExpressRequest & { user: AuthenticatedUser };
 
 @ApiTags('HR Module')
 @ApiBearerAuth()
@@ -41,7 +45,10 @@ export class HrController {
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Get HR dashboard statistics' })
-  getDashboardStats(@Request() req: any, @Query('year') year?: string) {
+  getDashboardStats(
+    @Request() req: AuthenticatedRequest,
+    @Query('year') year?: string,
+  ) {
     return this.hrService.getDashboardStats(
       req.user.id,
       year ? parseInt(year) : undefined,
@@ -163,32 +170,27 @@ export class HrController {
 
   @Get('employees/:id')
   @ApiOperation({ summary: 'Get employee by id' })
-  findEmployeeById(@CurrentUser() user: any, @Param('id') id: string) {
+  findEmployeeById(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
     return this.hrService.findEmployeeById(user, id);
   }
 
   @Patch('employees/:id')
   @ApiOperation({ summary: 'Update an employee' })
   async updateEmployee(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: UpdateEmployeeDto,
   ) {
-    try {
-      return await this.hrService.updateEmployee(user, id, dto);
-    } catch (err: any) {
-      require('fs').writeFileSync(
-        'debug-error.log',
-        err.stack || err.message || String(err),
-      );
-      throw err;
-    }
+    return this.hrService.updateEmployee(user, id, dto);
   }
 
   @Patch('employees/:id/status')
   @ApiOperation({ summary: 'Update employee status (active/inactive)' })
   updateEmployeeStatus(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body('isActive') isActive: boolean,
   ) {
@@ -197,7 +199,10 @@ export class HrController {
 
   @Delete('employees/:id')
   @ApiOperation({ summary: 'Delete an employee (and their user account)' })
-  deleteEmployee(@CurrentUser() user: any, @Param('id') id: string) {
+  deleteEmployee(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
     return this.hrService.deleteEmployee(user, id);
   }
 
@@ -233,7 +238,7 @@ export class HrController {
   @Put('leaves/:id/verify')
   @ApiOperation({ summary: 'Verify (Approve) or Reject a leave request' })
   processLeaveRequest(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('id') id: string,
     @Body('action') action: 'Approve' | 'Reject',
     @Body('comment') comment?: string,
@@ -246,7 +251,7 @@ export class HrController {
   @Patch('leaves/:id/view')
   @ApiOperation({ summary: 'Mark a leave request as viewed by HR' })
   markAsViewed(
-    @Request() req: any,
+    @Request() req: AuthenticatedRequest,
     @Param('id') id: string,
     @Query('lock') lock?: string,
   ) {

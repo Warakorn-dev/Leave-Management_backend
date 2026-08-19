@@ -86,20 +86,21 @@ export class AuthService {
       );
     }
 
-    // Always mark as used immediately to prevent replay attacks
-    if (!captchaRecord.isUsed) {
-      await this.prisma.captcha.update({
-        where: { id: captchaId },
-        data: { isUsed: true },
-      });
-    }
-
-    if (captchaRecord.isUsed) {
+    if (captchaRecord.isUsed || new Date() > captchaRecord.expiredAt) {
       throw new BadRequestException('รหัส CAPTCHA ถูกใช้งานไปแล้ว กรุณาขอใหม่');
     }
 
-    if (new Date() > captchaRecord.expiredAt) {
-      throw new BadRequestException('รหัส CAPTCHA หมดอายุ กรุณาขอใหม่');
+    const claim = await this.prisma.captcha.updateMany({
+      where: {
+        id: captchaId,
+        isUsed: false,
+        expiredAt: { gt: new Date() },
+      },
+      data: { isUsed: true },
+    });
+
+    if (claim.count === 0) {
+      throw new BadRequestException('รหัส CAPTCHA ถูกใช้งานไปแล้ว กรุณาขอใหม่');
     }
 
     if (captchaRecord.captchaCode.toLowerCase() !== captchaCode.toLowerCase()) {
@@ -233,7 +234,7 @@ export class AuthService {
       `<p>Hello ${user.username},</p><p>Please click the link below to reset your password:</p><p><a href="${resetUrl}">Reset Password</a></p><p>If you didn't request this, you can ignore this email.</p>`,
     );
 
-    return { message: 'Password reset link sent to email', token: resetToken };
+    return { message: 'Password reset link sent to email' };
   }
 
   async resetPassword(resetDto: ResetPasswordDto) {

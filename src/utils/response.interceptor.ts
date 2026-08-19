@@ -13,6 +13,14 @@ export interface Response<T> {
   data: T;
 }
 
+type MessageResponse = {
+  message?: unknown;
+  data?: unknown;
+};
+
+const isMessageResponse = (value: unknown): value is MessageResponse =>
+  typeof value === 'object' && value !== null;
+
 @Injectable()
 export class ResponseInterceptor<T> implements NestInterceptor<T, Response<T>> {
   intercept(
@@ -20,11 +28,17 @@ export class ResponseInterceptor<T> implements NestInterceptor<T, Response<T>> {
     next: CallHandler,
   ): Observable<Response<T>> {
     return next.handle().pipe(
-      map((data) => ({
-        success: true,
-        message: data?.message || 'Request successful',
-        data: data?.data ?? data, // If data contains { message, data }, extract it
-      })),
+      map((data) => {
+        const responseData = isMessageResponse(data) ? data : undefined;
+        return {
+          success: true,
+          message:
+            typeof responseData?.message === 'string'
+              ? responseData.message
+              : 'Request successful',
+          data: (responseData?.data ?? data) as T,
+        };
+      }),
     );
   }
 }

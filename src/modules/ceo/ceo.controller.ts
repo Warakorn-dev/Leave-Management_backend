@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/interfaces/authenticated-user.interface';
 
 @ApiTags('CEO Dashboard and Reports')
 @ApiBearerAuth()
@@ -24,7 +25,10 @@ export class CeoController {
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Get CEO Dashboard statistics' })
-  getDashboardStats(@CurrentUser() user: any, @Query('year') year?: string) {
+  getDashboardStats(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('year') year?: string,
+  ) {
     return this.ceoService.getDashboardStats(
       user.id,
       year ? parseInt(year) : undefined,
@@ -60,7 +64,7 @@ export class CeoController {
   @Put('approve/:id')
   @ApiOperation({ summary: 'CEO approve special leave request' })
   approveSpecialLeave(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body('comment') comment: string,
   ) {
@@ -70,7 +74,7 @@ export class CeoController {
   @Put('reject/:id')
   @ApiOperation({ summary: 'CEO reject special leave request' })
   rejectSpecialLeave(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body('comment') comment: string,
   ) {

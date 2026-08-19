@@ -7,7 +7,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
-  Headers,
+  UnauthorizedException,
   Query,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
@@ -22,17 +22,25 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { AuthGuard } from '@nestjs/passport';
+import { ConfigService } from '@nestjs/config';
+import type { AuthenticatedUser } from './interfaces/authenticated-user.interface';
 
 @ApiTags('Authentication')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Put('profile')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update user profile (name, phone, password)' })
-  updateProfile(@CurrentUser() user: any, @Body() updateDto: UpdateProfileDto) {
+  updateProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() updateDto: UpdateProfileDto,
+  ) {
     return this.authService.updateProfile(user.id, updateDto);
   }
 
@@ -61,7 +69,7 @@ export class AuthController {
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Logout and invalidate refresh token' })
-  logout(@CurrentUser() user: any) {
+  logout(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.logout(user.id);
   }
 
@@ -70,23 +78,21 @@ export class AuthController {
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh JWT tokens using refresh token' })
-  refreshTokens(@CurrentUser() user: any) {
+  refreshTokens(@CurrentUser() user: AuthenticatedUser) {
+    if (!user.refreshToken) {
+      throw new UnauthorizedException('Refresh token is required');
+    }
     return this.authService.refreshTokens(user.id, user.refreshToken);
   }
 
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request password reset email' })
-  forgotPassword(
-    @Body() forgotPasswordDto: ForgotPasswordDto,
-    @Headers('origin') origin: string,
-    @Headers('referer') referer: string,
-  ) {
-    let baseUrl = origin || 'http://localhost:3000';
-    if (!origin && referer) {
-      const url = new URL(referer);
-      baseUrl = `${url.protocol}//${url.host}`;
-    }
+  forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    const baseUrl =
+      this.configService.get<string>('frontendUrl') ||
+      this.configService.get<string>('corsOrigins')?.split(',')[0].trim() ||
+      'http://localhost:3000';
     return this.authService.forgotPassword(forgotPasswordDto.username, baseUrl);
   }
 

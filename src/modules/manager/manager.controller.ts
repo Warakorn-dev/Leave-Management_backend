@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/interfaces/authenticated-user.interface';
 
 @ApiTags('Manager Leave Processing Module')
 @ApiBearerAuth()
@@ -25,7 +26,10 @@ export class ManagerController {
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Get manager dashboard statistics' })
-  getDashboardStats(@CurrentUser() user: any, @Query('year') year?: string) {
+  getDashboardStats(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('year') year?: string,
+  ) {
     return this.managerService.getDashboardStats(
       user.id,
       year ? parseInt(year) : undefined,
@@ -34,20 +38,20 @@ export class ManagerController {
 
   @Get('pending')
   @ApiOperation({ summary: 'Get pending leave requests for the department' })
-  getPendingRequests(@CurrentUser() user: any) {
+  getPendingRequests(@CurrentUser() user: AuthenticatedUser) {
     return this.managerService.getPendingRequests(user.id);
   }
 
   @Get('history')
   @ApiOperation({ summary: 'Get leave history for the department' })
-  getDepartmentHistory(@CurrentUser() user: any) {
+  getDepartmentHistory(@CurrentUser() user: AuthenticatedUser) {
     return this.managerService.getDepartmentHistory(user.id);
   }
 
   @Put('approve/:id')
   @ApiOperation({ summary: 'Approve a leave request' })
   approveRequest(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: ProcessLeaveRequestDto,
   ) {
@@ -57,7 +61,7 @@ export class ManagerController {
   @Put('reject/:id')
   @ApiOperation({ summary: 'Reject a leave request' })
   rejectRequest(
-    @CurrentUser() user: any,
+    @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: ProcessLeaveRequestDto,
   ) {
