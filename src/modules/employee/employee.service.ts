@@ -958,7 +958,7 @@ export class EmployeeService {
     const approvedThisYear = await this.prisma.leaveRequest.count({
       where: {
         employeeId: employee.id,
-        status: { contains: 'Approved' },
+        status: 'APPROVED',
         startDate: {
           gte: new Date(`${currentYear}-01-01T00:00:00.000Z`),
           lt: new Date(`${currentYear + 1}-01-01T00:00:00.000Z`)
@@ -969,14 +969,14 @@ export class EmployeeService {
     const rejectedRequests = await this.prisma.leaveRequest.count({
       where: {
         employeeId: employee.id,
-        status: { contains: 'Rejected' }
+        status: 'REJECTED'
       }
     });
 
     const approvedLeaves = await this.prisma.leaveRequest.findMany({
       where: {
         employeeId: employee.id,
-        status: { contains: 'Approved' },
+        status: 'APPROVED',
         startDate: {
           gte: new Date(`${currentYear}-01-01T00:00:00.000Z`),
           lt: new Date(`${currentYear + 1}-01-01T00:00:00.000Z`)
@@ -1007,10 +1007,11 @@ export class EmployeeService {
     const activities = recentLeaves.map(r => {
       let color = "bg-orange-400";
       let statusText = "ส่งคำขอแล้ว";
-      if (r.status.includes("Approved")) {
+      const upperStatus = r.status?.toUpperCase() || '';
+      if (upperStatus === 'APPROVED' || upperStatus.includes('APPROVED')) {
           color = "bg-emerald-400";
           statusText = "อนุมัติแล้ว";
-      } else if (r.status.includes("Rejected")) {
+      } else if (upperStatus === 'REJECTED' || upperStatus.includes('REJECTED')) {
           color = "bg-red-400";
           statusText = "ถูกปฏิเสธ";
       }

@@ -3,6 +3,8 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import * as ExcelJS from 'exceljs';
 import * as PDFDocument from 'pdfkit';
 import { Response } from 'express';
+import * as path from 'path';
+import * as fs from 'fs';
 
 @Injectable()
 export class ExportService {
@@ -49,19 +51,30 @@ export class ExportService {
       include: { employee: true, leaveType: true },
     });
 
-    const doc = new PDFDocument();
+    const doc = new PDFDocument({ margin: 40 });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename=leave_report.pdf');
 
     doc.pipe(res);
-    doc.fontSize(20).text('Leave Management Report', { align: 'center' });
-    doc.moveDown();
+
+    const fontPath = path.join(process.cwd(), 'fonts', 'Sarabun-Regular.ttf');
+    if (fs.existsSync(fontPath)) {
+      doc.font(fontPath);
+    }
+
+    doc.fontSize(18).text('รายงานการลางาน (Leave Management Report)', { align: 'center' });
+    doc.moveDown(1.5);
 
     leaves.forEach((leave, i) => {
-      doc.fontSize(12).text(`${i + 1}. ${leave.employee.firstName} ${leave.employee.lastName} - ${leave.leaveType.name}`);
-      doc.text(`   Dates: ${leave.startDate.toISOString().split('T')[0]} to ${leave.endDate.toISOString().split('T')[0]}`);
-      doc.text(`   Status: ${leave.status}`);
-      doc.moveDown();
+      const empName = leave.employee ? `${leave.employee.firstName} ${leave.employee.lastName}` : 'พนักงาน';
+      const leaveName = leave.leaveType?.name || 'ลางาน';
+      const startDateStr = leave.startDate.toISOString().split('T')[0];
+      const endDateStr = leave.endDate.toISOString().split('T')[0];
+
+      doc.fontSize(12).text(`${i + 1}. ${empName} - ${leaveName}`);
+      doc.fontSize(10).fillColor('#4B5563').text(`   วันที่: ${startDateStr} ถึง ${endDateStr} (${leave.totalDays} วัน) | สถานะ: ${leave.status}`);
+      doc.fillColor('#000000');
+      doc.moveDown(0.8);
     });
 
     doc.end();

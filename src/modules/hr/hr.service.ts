@@ -534,7 +534,7 @@ export class HrService {
 
     const leavesTodayCount = await this.prisma.leaveRequest.count({
       where: {
-        status: { contains: 'Approved' },
+        status: 'APPROVED',
         startDate: { lte: tomorrow },
         endDate: { gte: today }
       }
@@ -542,7 +542,7 @@ export class HrService {
 
     const monthlyStatsRaw = await this.prisma.leaveRequest.findMany({
       where: {
-        status: { contains: 'Approved' },
+        status: 'APPROVED',
         startDate: {
           gte: new Date(`${currentYear}-01-01`),
           lt: new Date(`${currentYear + 1}-01-01`)
@@ -568,10 +568,11 @@ export class HrService {
     const formattedActivities = activities.map((r: any) => {
       let color = "bg-orange-400";
       let statusText = "ส่งคำขอแล้ว";
-      if (r.status.includes("Approved")) {
+      const upperStatus = r.status?.toUpperCase() || '';
+      if (upperStatus === 'APPROVED' || upperStatus.includes('APPROVED')) {
         color = "bg-emerald-400";
         statusText = "อนุมัติแล้ว";
-      } else if (r.status.includes("Rejected")) {
+      } else if (upperStatus === 'REJECTED' || upperStatus.includes('REJECTED')) {
         color = "bg-red-400";
         statusText = "ถูกปฏิเสธ";
       }
@@ -600,8 +601,8 @@ export class HrService {
       if (vacationBalance) remainingVacation = vacationBalance.remainingDays;
 
       personalPending = employee.leaveRequests.filter(r => r.status.startsWith('PENDING_')).length;
-      personalApproved = employee.leaveRequests.filter(r => r.status.includes('Approved') && new Date(r.startDate).getFullYear() === currentYear).length;
-      personalRejected = employee.leaveRequests.filter(r => r.status.includes('Rejected')).length;
+      personalApproved = employee.leaveRequests.filter(r => (r.status?.toUpperCase() === 'APPROVED') && new Date(r.startDate).getFullYear() === currentYear).length;
+      personalRejected = employee.leaveRequests.filter(r => r.status?.toUpperCase() === 'REJECTED').length;
     }
 
     return {
@@ -652,7 +653,7 @@ export class HrService {
         },
         leaveRequests: {
           where: {
-            status: { contains: 'Approved' },
+            status: 'APPROVED',
             ...(startDate ? { startDate: { gte: new Date(startDate) } } : {}),
             ...(endDate ? { endDate: { lte: new Date(endDate) } } : {}),
             ...(leaveTypeId && leaveTypeId !== 'all' ? { leaveTypeId } : {})
