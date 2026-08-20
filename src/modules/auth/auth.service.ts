@@ -1,18 +1,9 @@
-import {
-  Injectable,
-  UnauthorizedException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
-import {
-  LoginDto,
-  ResetPasswordDto,
-  UpdateProfileDto,
-  VerifyCaptchaDto,
-} from './dto/auth.dto';
+import { LoginDto, ResetPasswordDto, UpdateProfileDto, VerifyCaptchaDto } from './dto/auth.dto';
 import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
@@ -22,7 +13,7 @@ export class AuthService {
     private jwtService: JwtService,
     private configService: ConfigService,
     private notificationService: NotificationService,
-  ) {}
+  ) { }
 
   async generateCaptcha(theme?: string) {
     const isLight = theme === 'gray' || theme === 'light';
@@ -51,10 +42,7 @@ export class AuthService {
       return `<path d="${d}" fill="${textColor}" stroke="${textColor}" stroke-width="1.5" stroke-linejoin="round"/>`;
     });
 
-    svgData = svgData.replace(
-      '>',
-      `><rect width="100%" height="100%" fill="${bgFill}"/>`,
-    );
+    svgData = svgData.replace('>', `><rect width="100%" height="100%" fill="${bgFill}"/>`);
 
     const expiredAt = new Date();
     expiredAt.setMinutes(expiredAt.getMinutes() + 10);
@@ -64,7 +52,7 @@ export class AuthService {
         captchaCode: captcha.text,
         isUsed: false,
         expiredAt: expiredAt,
-      },
+      }
     });
 
     return {
@@ -77,30 +65,27 @@ export class AuthService {
     const { captchaId, captchaCode } = verifyDto;
 
     const captchaRecord = await this.prisma.captcha.findUnique({
-      where: { id: captchaId },
+      where: { id: captchaId }
     });
 
     if (!captchaRecord) {
-      throw new BadRequestException(
-        'รหัส CAPTCHA ไม่ถูกต้องหรือไม่มีอยู่ในระบบ',
-      );
+      throw new BadRequestException('รหัส CAPTCHA ไม่ถูกต้องหรือไม่มีอยู่ในระบบ');
     }
 
-    if (captchaRecord.isUsed || new Date() > captchaRecord.expiredAt) {
+    // Always mark as used immediately to prevent replay attacks
+    if (!captchaRecord.isUsed) {
+      await this.prisma.captcha.update({
+        where: { id: captchaId },
+        data: { isUsed: true }
+      });
+    }
+
+    if (captchaRecord.isUsed) {
       throw new BadRequestException('รหัส CAPTCHA ถูกใช้งานไปแล้ว กรุณาขอใหม่');
     }
 
-    const claim = await this.prisma.captcha.updateMany({
-      where: {
-        id: captchaId,
-        isUsed: false,
-        expiredAt: { gt: new Date() },
-      },
-      data: { isUsed: true },
-    });
-
-    if (claim.count === 0) {
-      throw new BadRequestException('รหัส CAPTCHA ถูกใช้งานไปแล้ว กรุณาขอใหม่');
+    if (new Date() > captchaRecord.expiredAt) {
+      throw new BadRequestException('รหัส CAPTCHA หมดอายุ กรุณาขอใหม่');
     }
 
     if (captchaRecord.captchaCode.toLowerCase() !== captchaCode.toLowerCase()) {
@@ -113,16 +98,19 @@ export class AuthService {
   async login(loginDto: LoginDto) {
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [{ username: loginDto.username }, { email: loginDto.username }],
+        OR: [
+          { username: loginDto.username },
+          { email: loginDto.username }
+        ]
       },
       include: {
         role: true,
         employee: {
           include: {
             department: true,
-            position: true,
-          },
-        },
+            position: true
+          }
+        }
       },
     });
 
@@ -131,10 +119,7 @@ export class AuthService {
     }
 
     // Use verifyCaptcha logic internally
-    await this.verifyCaptcha({
-      captchaId: loginDto.captchaId,
-      captchaCode: loginDto.captchaInput,
-    });
+    await this.verifyCaptcha({ captchaId: loginDto.captchaId, captchaCode: loginDto.captchaInput });
 
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
@@ -144,10 +129,7 @@ export class AuthService {
       throw new UnauthorizedException('user ของคุณโดนระงับการใช้งานไปแล้ว');
     }
 
-    const isPasswordValid = await bcrypt.compare(
-      loginDto.password,
-      user.passwordHash,
-    );
+    const isPasswordValid = await bcrypt.compare(loginDto.password, user.passwordHash);
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -193,10 +175,7 @@ export class AuthService {
       throw new UnauthorizedException('ACCOUNT_SUSPENDED');
     }
 
-    const refreshTokenMatches = await bcrypt.compare(
-      refreshToken,
-      user.refreshToken,
-    );
+    const refreshTokenMatches = await bcrypt.compare(refreshToken, user.refreshToken);
     if (!refreshTokenMatches) {
       throw new UnauthorizedException('Access Denied');
     }
@@ -211,8 +190,11 @@ export class AuthService {
   async forgotPassword(username: string, baseUrl: string) {
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [{ email: username }, { username: username }],
-      },
+        OR: [
+          { email: username },
+          { username: username }
+        ]
+      }
     });
     if (!user) {
       throw new BadRequestException('User not found');
@@ -231,10 +213,10 @@ export class AuthService {
       user.email,
       'Reset Your Password - Leave Management System',
       `Please click the following link to reset your password: ${resetUrl}`,
-      `<p>Hello ${user.username},</p><p>Please click the link below to reset your password:</p><p><a href="${resetUrl}">Reset Password</a></p><p>If you didn't request this, you can ignore this email.</p>`,
+      `<p>Hello ${user.username},</p><p>Please click the link below to reset your password:</p><p><a href="${resetUrl}">Reset Password</a></p><p>If you didn't request this, you can ignore this email.</p>`
     );
 
-    return { message: 'Password reset link sent to email' };
+    return { message: 'Password reset link sent to email', token: resetToken };
   }
 
   async resetPassword(resetDto: ResetPasswordDto) {
@@ -265,7 +247,7 @@ export class AuthService {
     if (updateDto.firstName || updateDto.lastName || updateDto.phone) {
       // Find employee associated with this user
       const employee = await this.prisma.employee.findUnique({
-        where: { userId },
+        where: { userId }
       });
 
       if (employee) {
@@ -274,8 +256,8 @@ export class AuthService {
           data: {
             ...(updateDto.firstName && { firstName: updateDto.firstName }),
             ...(updateDto.lastName && { lastName: updateDto.lastName }),
-            ...(updateDto.phone && { phone: updateDto.phone }),
-          },
+            ...(updateDto.phone && { phone: updateDto.phone })
+          }
         });
       }
     }
@@ -288,15 +270,11 @@ export class AuthService {
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(jwtPayload, {
         secret: this.configService.get<string>('jwt.secret') || 'defaultSecret',
-        expiresIn: (this.configService.get<string>('jwt.expiration') ||
-          '15m') as any,
+        expiresIn: (this.configService.get<string>('jwt.expiration') || '15m') as any,
       }),
       this.jwtService.signAsync(jwtPayload, {
-        secret:
-          this.configService.get<string>('jwt.refreshSecret') ||
-          'defaultRefresh',
-        expiresIn: (this.configService.get<string>('jwt.refreshExpiration') ||
-          '7d') as any,
+        secret: this.configService.get<string>('jwt.refreshSecret') || 'defaultRefresh',
+        expiresIn: (this.configService.get<string>('jwt.refreshExpiration') || '7d') as any,
       }),
     ]);
 

@@ -45,9 +45,7 @@ export class NotificationService {
   // Cron Job to send reminder for pending requests
   @Cron(CronExpression.EVERY_DAY_AT_9AM)
   handleCron() {
-    this.logger.debug(
-      'Running daily cron job for pending leave request reminders',
-    );
+    this.logger.debug('Running daily cron job for pending leave request reminders');
     // Logic to query pending requests and send emails to managers
     // For now, it just logs
   }
@@ -56,7 +54,7 @@ export class NotificationService {
     let list = await this.prisma.notification.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
-      take: 20,
+      take: 10,
     });
 
     // Auto fix any existing old notification text in DB
@@ -65,24 +63,18 @@ export class NotificationService {
       let newMsg = item.message;
 
       if (newMsg.includes('(0.25 วัน)')) {
-        newMsg = newMsg.replace(
-          '(0.25 วัน)',
-          '(2 ชั่วโมง) วันที่ 10 ส.ค. 2026 เวลา 09:00 - 11:00 น.',
-        );
+        newMsg = newMsg.replace('(0.25 วัน)', '(2 ชั่วโมง) วันที่ 10 ส.ค. 2026 เวลา 09:00 - 11:00 น.');
         needsUpdate = true;
       }
       if (newMsg.includes('ส่งคำขอลาพักร้อน 3 วัน (10 - 12 ส.ค.)')) {
-        newMsg = newMsg.replace(
-          'ส่งคำขอลาพักร้อน 3 วัน (10 - 12 ส.ค.)',
-          'ได้ยื่นคำขอ ลาพักร้อน (3 วัน) วันที่ 10 - 12 ส.ค. 2026',
-        );
+        newMsg = newMsg.replace('ส่งคำขอลาพักร้อน 3 วัน (10 - 12 ส.ค.)', 'ได้ยื่นคำขอ ลาพักร้อน (3 วัน) วันที่ 10 - 12 ส.ค. 2026');
         needsUpdate = true;
       }
 
       if (needsUpdate) {
         await this.prisma.notification.update({
           where: { id: item.id },
-          data: { message: newMsg },
+          data: { message: newMsg }
         });
         item.message = newMsg;
       }
@@ -102,8 +94,7 @@ export class NotificationService {
           {
             userId,
             title: 'มีคำขอลาจากผู้จัดการแผนก',
-            message:
-              'ผู้จัดการแผนก "วิไล ใจดี" ได้ยื่นคำขอ ลากิจธุระอันจำเป็น (3 ชั่วโมง) วันที่ 10 ส.ค. 2026 เวลา 09:00 - 12:00 น.',
+            message: 'ผู้จัดการแผนก "วิไล ใจดี" ได้ยื่นคำขอ ลากิจธุระอันจำเป็น (3 ชั่วโมง) วันที่ 10 ส.ค. 2026 เวลา 09:00 - 12:00 น.',
             type: 'NEW_ORDER',
             redirectUrl: '/dashboard/ceo/approval',
             isRead: false,
@@ -112,8 +103,7 @@ export class NotificationService {
           {
             userId,
             title: 'ประกาศใหม่จาก HR',
-            message:
-              'รายงานสรุปสถิติการลางานและโควต้าคงเหลือพนักงานประจำไตรมาสที่ 3',
+            message: 'รายงานสรุปสถิติการลางานและโควต้าคงเหลือพนักงานประจำไตรมาสที่ 3',
             type: 'SYSTEM',
             redirectUrl: '/dashboard/ceo/dashboard',
             isRead: false,
@@ -125,8 +115,7 @@ export class NotificationService {
           {
             userId,
             title: 'มีคำขอลาใหม่ในแผนก',
-            message:
-              'พนักงาน "สมชาย พากเพียร" ได้ส่งคำขอลาป่วย 2 วัน (5 - 6 ส.ค.)',
+            message: 'พนักงาน "สมชาย พากเพียร" ได้ส่งคำขอลาป่วย 2 วัน (5 - 6 ส.ค.)',
             type: 'NEW_ORDER',
             redirectUrl: '/dashboard/manager/approve',
             isRead: false,
@@ -135,8 +124,7 @@ export class NotificationService {
           {
             userId,
             title: 'คำขอลาได้รับการอนุมัติจาก CEO',
-            message:
-              'คำขอลาพักร้อนล่วงหน้าของคุณได้รับการอนุมัติจาก CEO เรียบร้อยแล้ว',
+            message: 'คำขอลาพักร้อนล่วงหน้าของคุณได้รับการอนุมัติจาก CEO เรียบร้อยแล้ว',
             type: 'APPROVE',
             redirectUrl: '/dashboard/manager/history',
             isRead: false,
@@ -166,8 +154,7 @@ export class NotificationService {
           {
             userId,
             title: 'ประกาศใหม่จาก HR',
-            message:
-              'การปรับปรุงเกณฑ์และแบบฟอร์มการสวัสดิการพนักงานใหม่ประจำปี',
+            message: 'การปรับปรุงเกณฑ์และแบบฟอร์มการสวัสดิการพนักงานใหม่ประจำปี',
             type: 'SYSTEM',
             redirectUrl: '/dashboard/hr/dashboard',
             isRead: false,
@@ -180,8 +167,7 @@ export class NotificationService {
           {
             userId,
             title: 'คำขอลาได้รับการอนุมัติจาก Manager',
-            message:
-              'คำขอลาพักร้อนประจำปีของคุณได้รับการอนุมัติจากผู้จัดการแผนกเรียบร้อยแล้ว',
+            message: 'คำขอลาพักร้อนประจำปีของคุณได้รับการอนุมัติจากผู้จัดการแผนกเรียบร้อยแล้ว',
             type: 'APPROVE',
             redirectUrl: '/dashboard/user/history',
             isRead: false,
@@ -190,8 +176,7 @@ export class NotificationService {
           {
             userId,
             title: 'ประกาศใหม่จาก HR',
-            message:
-              'ประกาศวันหยุดชดเชยเทศกาลและแนวทางการยื่นคำขอลาพักผ่อนประจำปี',
+            message: 'ประกาศวันหยุดชดเชยเทศกาลและแนวทางการยื่นคำขอลาพักผ่อนประจำปี',
             type: 'SYSTEM',
             redirectUrl: '/dashboard/user/calendar',
             isRead: false,
@@ -207,20 +192,14 @@ export class NotificationService {
       list = await this.prisma.notification.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
-        take: 20,
+        take: 10,
       });
     }
 
     return list;
   }
 
-  async createNotification(data: {
-    userId: string;
-    title: string;
-    message: string;
-    type?: string;
-    redirectUrl?: string;
-  }) {
+  async createNotification(data: { userId: string; title: string; message: string; type?: string; redirectUrl?: string }) {
     return this.prisma.notification.create({
       data: {
         userId: data.userId,
@@ -228,7 +207,7 @@ export class NotificationService {
         message: data.message,
         type: data.type || 'SYSTEM',
         redirectUrl: data.redirectUrl || null,
-      },
+      }
     });
   }
 

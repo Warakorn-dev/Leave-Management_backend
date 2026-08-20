@@ -1,17 +1,8 @@
-import {
-  Controller,
-  Get,
-  Patch,
-  Post,
-  Param,
-  UseGuards,
-  Request,
-} from '@nestjs/common';
+import { Controller, Get, Patch, Post, Param, UseGuards, Request } from '@nestjs/common';
 import { NotificationService } from './notification.service';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import type { AuthenticatedUser } from '../auth/interfaces/authenticated-user.interface';
 
 @ApiTags('Notifications')
 @ApiBearerAuth()
@@ -22,30 +13,30 @@ export class NotificationController {
 
   @Get()
   @ApiOperation({ summary: 'Get all notifications for current user' })
-  async getNotifications(@CurrentUser() user: AuthenticatedUser) {
+  async getNotifications(@CurrentUser() user: any) {
     try {
       return await this.notificationService.getNotifications(user.id);
     } catch (e) {
-      console.error('NOTIFICATION API ERROR:', e);
+      console.error("NOTIFICATION API ERROR:", e);
       throw e;
     }
   }
 
   @Patch(':id/read')
   @ApiOperation({ summary: 'Mark a notification as read' })
-  markAsRead(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+  markAsRead(@Param('id') id: string, @CurrentUser() user: any) {
     return this.notificationService.markAsRead(id, user.id);
   }
 
   @Post('read-all')
   @ApiOperation({ summary: 'Mark all notifications as read (POST)' })
-  markAllAsReadPost(@CurrentUser() user: AuthenticatedUser) {
+  markAllAsReadPost(@CurrentUser() user: any) {
     return this.notificationService.markAllAsRead(user.id);
   }
 
   @Patch('readAll')
   @ApiOperation({ summary: 'Mark all notifications as read (PATCH)' })
-  markAllAsReadPatch(@CurrentUser() user: AuthenticatedUser) {
+  markAllAsReadPatch(@CurrentUser() user: any) {
     return this.notificationService.markAllAsRead(user.id);
   }
 }

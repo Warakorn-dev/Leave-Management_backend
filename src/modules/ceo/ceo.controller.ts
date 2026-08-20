@@ -1,19 +1,10 @@
-import {
-  Controller,
-  Get,
-  Put,
-  Param,
-  Body,
-  UseGuards,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Put, Param, Body, UseGuards, Query } from '@nestjs/common';
 import { CeoService } from './ceo.service';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import type { AuthenticatedUser } from '../auth/interfaces/authenticated-user.interface';
 
 @ApiTags('CEO Dashboard and Reports')
 @ApiBearerAuth()
@@ -25,14 +16,8 @@ export class CeoController {
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Get CEO Dashboard statistics' })
-  getDashboardStats(
-    @CurrentUser() user: AuthenticatedUser,
-    @Query('year') year?: string,
-  ) {
-    return this.ceoService.getDashboardStats(
-      user.id,
-      year ? parseInt(year) : undefined,
-    );
+  getDashboardStats(@CurrentUser() user: any, @Query('year') year?: string) {
+    return this.ceoService.getDashboardStats(user.id, year ? parseInt(year) : undefined);
   }
 
   @Get('report/company')
@@ -54,9 +39,7 @@ export class CeoController {
   }
 
   @Get('pending')
-  @ApiOperation({
-    summary: 'Get pending executive leave requests (PENDING_EXECUTIVE)',
-  })
+  @ApiOperation({ summary: 'Get pending executive leave requests (PENDING_EXECUTIVE)' })
   getPendingExecutive() {
     return this.ceoService.getPendingExecutive();
   }
@@ -64,7 +47,7 @@ export class CeoController {
   @Put('approve/:id')
   @ApiOperation({ summary: 'CEO approve special leave request' })
   approveSpecialLeave(
-    @CurrentUser() user: AuthenticatedUser,
+    @CurrentUser() user: any,
     @Param('id') id: string,
     @Body('comment') comment: string,
   ) {
@@ -74,7 +57,7 @@ export class CeoController {
   @Put('reject/:id')
   @ApiOperation({ summary: 'CEO reject special leave request' })
   rejectSpecialLeave(
-    @CurrentUser() user: AuthenticatedUser,
+    @CurrentUser() user: any,
     @Param('id') id: string,
     @Body('comment') comment: string,
   ) {

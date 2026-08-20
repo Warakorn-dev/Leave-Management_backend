@@ -16,19 +16,13 @@ export class AnnouncementService {
     return (this.prisma as any).announcement.findMany(query);
   }
 
-  async create(data: {
-    title: string;
-    subtitle: string;
-    isImportant: boolean;
-  }) {
+  async create(data: { title: string; subtitle: string; isImportant: boolean }) {
     const item = await (this.prisma as any).announcement.create({
       data,
     });
 
     try {
-      const allUsers = await this.prisma.user.findMany({
-        select: { id: true },
-      });
+      const allUsers = await this.prisma.user.findMany({ select: { id: true } });
       for (const u of allUsers) {
         await this.prisma.notification.create({
           data: {
@@ -37,7 +31,7 @@ export class AnnouncementService {
             message: data.title + (data.subtitle ? `: ${data.subtitle}` : ''),
             type: 'SYSTEM',
             redirectUrl: '/dashboard/user/page',
-          },
+          }
         });
       }
     } catch (err) {
@@ -47,10 +41,7 @@ export class AnnouncementService {
     return item;
   }
 
-  async update(
-    id: string,
-    data: { title?: string; subtitle?: string; isImportant?: boolean },
-  ) {
+  async update(id: string, data: { title?: string; subtitle?: string; isImportant?: boolean }) {
     return (this.prisma as any).announcement.update({
       where: { id },
       data,

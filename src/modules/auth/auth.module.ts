@@ -18,8 +18,7 @@ import { NotificationModule } from '../notification/notification.module';
       useFactory: async (configService: ConfigService) => ({
         secret: configService.get<string>('jwt.secret') || 'defaultSecret',
         signOptions: {
-          expiresIn: (configService.get<string>('jwt.expiration') ||
-            '15m') as any,
+          expiresIn: (configService.get<string>('jwt.expiration') || '15m') as any,
         },
       }),
     }),

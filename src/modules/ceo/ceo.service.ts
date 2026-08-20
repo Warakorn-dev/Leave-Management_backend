@@ -1,52 +1,37 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class CeoService {
-  constructor(
-    private prisma: PrismaService,
-    private notificationService: NotificationService,
-  ) {}
+  constructor(private prisma: PrismaService, private notificationService: NotificationService) {}
 
   async getDashboardStats(userId: string, targetYear?: number) {
     const totalEmployees = await this.prisma.employee.count({
-      where: { user: { role: { name: { not: 'CEO' } } } },
+      where: { user: { role: { name: { not: 'CEO' } } } }
     });
     const totalLeaves = await this.prisma.leaveRequest.count();
-
+    
     // Calculate pending leaves (across all levels to show overall pending load)
-    const pendingLeaves = await this.prisma.leaveRequest.count({
-      where: {
-        status: {
-          in: ['PENDING_VERIFY', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'],
-        },
-      },
+    const pendingLeaves = await this.prisma.leaveRequest.count({ 
+      where: { status: { in: ['PENDING_VERIFY', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'] } } 
     });
-
-    const approvedLeaves = await this.prisma.leaveRequest.count({
-      where: { status: 'APPROVED' },
-    });
-    const rejectedLeaves = await this.prisma.leaveRequest.count({
-      where: { status: 'REJECTED' },
-    });
+    
+    const approvedLeaves = await this.prisma.leaveRequest.count({ where: { status: 'APPROVED' } });
+    const rejectedLeaves = await this.prisma.leaveRequest.count({ where: { status: 'REJECTED' } });
 
     // Calculate leaves today
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
-
+    
     const leavesToday = await this.prisma.leaveRequest.count({
       where: {
         status: 'APPROVED',
         startDate: { lte: today },
-        endDate: { gte: today },
-      },
+        endDate: { gte: today }
+      }
     });
 
     // Chart Data (Leaves per month this year)
@@ -56,29 +41,26 @@ export class CeoService {
         startDate: {
           gte: new Date(`${currentYear}-01-01`),
           lte: new Date(`${currentYear}-12-31`),
-        },
+        }
       },
-      select: { startDate: true, employeeId: true },
+      select: { startDate: true, employeeId: true }
     });
 
-    const monthlyEmployeeSets = Array.from(
-      { length: 12 },
-      () => new Set<string>(),
-    );
-    leavesThisYear.forEach((leave) => {
+    const monthlyEmployeeSets = Array.from({ length: 12 }, () => new Set<string>());
+    leavesThisYear.forEach(leave => {
       const month = leave.startDate.getMonth();
       monthlyEmployeeSets[month].add(leave.employeeId);
     });
-
-    const monthlyStats = monthlyEmployeeSets.map((set) => set.size);
+    
+    const monthlyStats = monthlyEmployeeSets.map(set => set.size);
 
     // Personal stats for CEO
     const employee = await this.prisma.employee.findUnique({
       where: { userId },
-      include: {
-        leaveBalances: { include: { leaveType: true } },
-        leaveRequests: true,
-      },
+      include: { 
+        leaveBalances: { include: { leaveType: true } }, 
+        leaveRequests: true 
+      }
     });
 
     let remainingVacation = 0;
@@ -87,59 +69,43 @@ export class CeoService {
     let personalRejected = 0;
 
     if (employee) {
-      const vacationBalance = employee.leaveBalances.find(
-        (b) => b.leaveType.name === 'ลาพักร้อน',
-      );
+      const vacationBalance = employee.leaveBalances.find(b => b.leaveType.name === 'ลาพักร้อน');
       remainingVacation = vacationBalance?.remainingDays || 0;
 
-      employee.leaveRequests.forEach((req) => {
+      employee.leaveRequests.forEach(req => {
         if (req.status.startsWith('PENDING_')) personalPending++;
         else if (req.status === 'APPROVED') {
-          if (new Date(req.startDate).getFullYear() === currentYear)
-            personalApproved++;
-        } else if (req.status === 'REJECTED') personalRejected++;
+          if (new Date(req.startDate).getFullYear() === currentYear) personalApproved++;
+        }
+        else if (req.status === 'REJECTED') personalRejected++;
       });
     }
 
-    const announcements = await this.prisma.announcement.findMany({
-      take: 2,
-      orderBy: { createdAt: 'desc' },
-    });
-
+    const announcements = await this.prisma.announcement.findMany({ take: 2, orderBy: { createdAt: 'desc' } });
+    
     const recentLeaves = await this.prisma.leaveRequest.findMany({
       take: 3,
       orderBy: { createdAt: 'desc' },
-      include: { employee: true },
+      include: { employee: true }
     });
-
-    const activities = recentLeaves.map((leave) => {
+    
+    const activities = recentLeaves.map(leave => {
       let timeText = 'เมื่อวาน';
-      const hours = Math.floor(
-        (new Date().getTime() - leave.createdAt.getTime()) / (1000 * 60 * 60),
-      );
+      const hours = Math.floor((new Date().getTime() - leave.createdAt.getTime()) / (1000 * 60 * 60));
       if (hours < 24) timeText = `${hours} ชม. ที่แล้ว`;
-
+      
       let action = 'ยื่นคำขอลา';
       let color = 'bg-amber-500';
-      if (leave.status === 'APPROVED') {
-        action = 'อนุมัติแล้ว';
-        color = 'bg-emerald-500';
-      }
-      if (leave.status === 'REJECTED') {
-        action = 'ถูกปฏิเสธ';
-        color = 'bg-red-500';
-      }
-      if (['CANCELLED', 'Cancelled'].includes(leave.status)) {
-        action = 'ยกเลิกคำขอลา';
-        color = 'bg-slate-500';
-      }
+      if (leave.status === 'APPROVED') { action = 'อนุมัติแล้ว'; color = 'bg-emerald-500'; }
+      if (leave.status === 'REJECTED') { action = 'ถูกปฏิเสธ'; color = 'bg-red-500'; }
+      if (['CANCELLED', 'Cancelled'].includes(leave.status)) { action = 'ยกเลิกคำขอลา'; color = 'bg-slate-500'; }
 
       const empName = leave.employee?.firstName || 'พนักงาน';
-
+      
       return {
         title: `${empName} - ${action}`,
         time: timeText,
-        color,
+        color
       };
     });
 
@@ -158,19 +124,19 @@ export class CeoService {
           remainingVacation,
           pendingApprovals: personalPending,
           approvedThisYear: personalApproved,
-          rejectedRequests: personalRejected,
+          rejectedRequests: personalRejected
         },
         announcements,
-        activities,
-      },
+        activities
+      }
     };
   }
 
   async getReportStats() {
     const totalEmployees = await this.prisma.employee.count({
-      where: { user: { role: { name: { not: 'CEO' } } } },
+      where: { user: { role: { name: { not: 'CEO' } } } }
     });
-
+    
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -180,18 +146,14 @@ export class CeoService {
       where: {
         status: 'APPROVED',
         startDate: { lte: today },
-        endDate: { gte: today },
-      },
+        endDate: { gte: today }
+      }
     });
 
     // Work status for today
     const workStatusData = [
-      {
-        name: 'มาทำงาน',
-        value: totalEmployees - leavesToday,
-        color: '#16a34a',
-      },
-      { name: 'ลางาน', value: leavesToday, color: '#ef4444' },
+      { name: 'มาทำงาน', value: totalEmployees - leavesToday, color: '#16a34a' },
+      { name: 'ลางาน', value: leavesToday, color: '#ef4444' }
     ];
 
     // Leave Types breakdown for this month
@@ -204,31 +166,26 @@ export class CeoService {
       where: {
         status: 'APPROVED',
         startDate: { lte: lastDayOfMonth },
-        endDate: { gte: firstDayOfMonth },
+        endDate: { gte: firstDayOfMonth }
       },
-      include: { leaveType: true },
+      include: { leaveType: true }
     });
 
     const leaveTypeCounts: Record<string, number> = {};
-    const totalLeaveRequests = leavesThisMonth.length;
-    leavesThisMonth.forEach((leave) => {
+    let totalLeaveRequests = leavesThisMonth.length;
+    leavesThisMonth.forEach(leave => {
       const typeName = leave.leaveType.name;
       leaveTypeCounts[typeName] = (leaveTypeCounts[typeName] || 0) + 1;
     });
 
     const colors = ['#f59e0b', '#16a34a', '#2563eb', '#8b5cf6', '#ec4899'];
     let colorIndex = 0;
-    const leaveTypesData = Object.entries(leaveTypeCounts).map(
-      ([name, count]) => {
-        const percent =
-          totalLeaveRequests > 0
-            ? Math.round((count / totalLeaveRequests) * 100)
-            : 0;
-        const color = colors[colorIndex % colors.length];
-        colorIndex++;
-        return { name, percent, color };
-      },
-    );
+    const leaveTypesData = Object.entries(leaveTypeCounts).map(([name, count]) => {
+      const percent = totalLeaveRequests > 0 ? Math.round((count / totalLeaveRequests) * 100) : 0;
+      const color = colors[colorIndex % colors.length];
+      colorIndex++;
+      return { name, percent, color };
+    });
 
     // Trend Data (Days of current month)
     const trendDataMap = new Map<number, number>();
@@ -236,37 +193,20 @@ export class CeoService {
       trendDataMap.set(i, 0);
     }
 
-    leavesThisMonth.forEach((leave) => {
+    leavesThisMonth.forEach(leave => {
       const start = new Date(leave.startDate);
       const end = new Date(leave.endDate);
-
+      
       const loopStart = start < firstDayOfMonth ? firstDayOfMonth : start;
       const loopEnd = end > lastDayOfMonth ? lastDayOfMonth : end;
-
-      for (
-        let d = new Date(loopStart);
-        d <= loopEnd;
-        d.setDate(d.getDate() + 1)
-      ) {
+      
+      for (let d = new Date(loopStart); d <= loopEnd; d.setDate(d.getDate() + 1)) {
         const day = d.getDate();
         trendDataMap.set(day, (trendDataMap.get(day) || 0) + 1);
       }
     });
 
-    const thaiMonths = [
-      'ม.ค.',
-      'ก.พ.',
-      'มี.ค.',
-      'เม.ย.',
-      'พ.ค.',
-      'มิ.ย.',
-      'ก.ค.',
-      'ส.ค.',
-      'ก.ย.',
-      'ต.ค.',
-      'พ.ย.',
-      'ธ.ค.',
-    ];
+    const thaiMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
     const monthStr = thaiMonths[currentMonth];
 
     const trendData: { day: string; value: number }[] = [];
@@ -275,7 +215,7 @@ export class CeoService {
       if (i === 1 || i % 5 === 0 || i === lastDayOfMonth.getDate()) {
         trendData.push({
           day: `${i} ${monthStr}`,
-          value: trendDataMap.get(i) || 0,
+          value: trendDataMap.get(i) || 0
         });
       }
     }
@@ -285,33 +225,28 @@ export class CeoService {
       data: {
         workStatusData,
         leaveTypesData,
-        trendData,
-      },
+        trendData
+      }
     };
   }
 
   async getCompanyReport() {
     return this.prisma.leaveRequest.findMany({
-      include: { employee: true, leaveType: true },
+      include: { employee: true, leaveType: true }
     });
   }
 
   async getDepartmentReport(departmentId: string) {
     return this.prisma.leaveRequest.findMany({
       where: { employee: { departmentId } },
-      include: { employee: true, leaveType: true },
+      include: { employee: true, leaveType: true }
     });
   }
 
-  async approveSpecialLeave(
-    ceoUserId: string,
-    requestId: string,
-    action: 'Approve' | 'Reject',
-    comment?: string,
-  ) {
+  async approveSpecialLeave(ceoUserId: string, requestId: string, action: 'Approve' | 'Reject', comment?: string) {
     const request = await this.prisma.leaveRequest.findUnique({
       where: { id: requestId },
-      include: { leaveType: true, employee: true },
+      include: { leaveType: true, employee: true }
     });
 
     if (!request || request.status !== 'PENDING_EXECUTIVE') {
@@ -324,156 +259,147 @@ export class CeoService {
 
     const nextStatus = action === 'Approve' ? 'APPROVED' : 'REJECTED';
 
-    return this.prisma
-      .$transaction(async (prisma) => {
-        const updated = await prisma.leaveRequest.update({
-          where: { id: requestId },
-          data: { status: nextStatus },
-        });
+    return this.prisma.$transaction(async (prisma) => {
+      const updated = await prisma.leaveRequest.update({
+        where: { id: requestId },
+        data: { status: nextStatus },
+      });
 
-        await prisma.leaveApproval.create({
-          data: {
-            leaveRequestId: requestId,
-            approverId: ceoUserId,
-            status: nextStatus,
-            comment: comment || '',
-          },
-        });
+      await prisma.leaveApproval.create({
+        data: {
+          leaveRequestId: requestId,
+          approverId: ceoUserId,
+          status: nextStatus,
+          comment: comment || '',
+        }
+      });
 
-        if (action === 'Reject' && request.status === 'APPROVED') {
-          // Only refund if the request was actually fully approved and deducted before
-          // (Wait, standard flow doesn't reject already Approved requests here, but just in case)
-          const currentYear = new Date(request.startDate).getFullYear();
-          const leaveBalance = await prisma.leaveBalance.findFirst({
-            where: {
-              employeeId: request.employeeId,
-              leaveTypeId: request.leaveTypeId,
-              year: currentYear,
-            },
-          });
-
-          if (leaveBalance) {
-            const newUsedDays = leaveBalance.usedDays - request.totalDays;
-            const newRemainingDays = leaveBalance.totalDays - newUsedDays;
-
-            await prisma.leaveBalance.update({
-              where: { id: leaveBalance.id },
-              data: {
-                usedDays: newUsedDays,
-                remainingDays: newRemainingDays,
-              },
-            });
+      if (action === 'Reject' && request.status === 'APPROVED') {
+        // Only refund if the request was actually fully approved and deducted before
+        // (Wait, standard flow doesn't reject already Approved requests here, but just in case)
+        const currentYear = new Date(request.startDate).getFullYear();
+        const leaveBalance = await prisma.leaveBalance.findFirst({
+          where: {
+            employeeId: request.employeeId,
+            leaveTypeId: request.leaveTypeId,
+            year: currentYear
           }
-        } else if (
-          action === 'Approve' &&
-          request.status === 'PENDING_EXECUTIVE'
-        ) {
-          const currentYear = new Date(request.startDate).getFullYear();
-          const leaveBalance = await prisma.leaveBalance.findFirst({
-            where: {
-              employeeId: request.employeeId,
-              leaveTypeId: request.leaveTypeId,
-              year: currentYear,
-            },
-          });
+        });
 
-          if (leaveBalance) {
-            // If the request was already created, the balance was NOT deducted during creation.
-            // Wait, is balance deducted during creation?
-            // The employee.service.ts createLeaveRequest does NOT deduct balance! It only validates.
-            // So we must deduct it here.
-            // remainingDays is the authoritative available balance. HR can adjust
-            // it manually, so recalculating it from totalDays and usedDays can use
-            // stale data and incorrectly reject a valid CEO approval.
-            const newRemainingDays =
-              leaveBalance.remainingDays - request.totalDays;
+        if (leaveBalance) {
+          const newUsedDays = leaveBalance.usedDays - request.totalDays;
+          const newRemainingDays = leaveBalance.totalDays - newUsedDays;
 
-            if (newRemainingDays < 0) {
-              throw new BadRequestException('Insufficient leave balance');
+          await prisma.leaveBalance.update({
+            where: { id: leaveBalance.id },
+            data: {
+              usedDays: newUsedDays,
+              remainingDays: newRemainingDays
             }
-
-            const newUsedDays = leaveBalance.totalDays - newRemainingDays;
-
-            await prisma.leaveBalance.update({
-              where: { id: leaveBalance.id },
-              data: {
-                usedDays: newUsedDays,
-                remainingDays: newRemainingDays,
-              },
-            });
+          });
+        }
+      } else if (action === 'Approve' && request.status === 'PENDING_EXECUTIVE') {
+        const currentYear = new Date(request.startDate).getFullYear();
+        const leaveBalance = await prisma.leaveBalance.findFirst({
+          where: {
+            employeeId: request.employeeId,
+            leaveTypeId: request.leaveTypeId,
+            year: currentYear
           }
+        });
+
+        if (leaveBalance) {
+          // If the request was already created, the balance was NOT deducted during creation.
+          // Wait, is balance deducted during creation?
+          // The employee.service.ts createLeaveRequest does NOT deduct balance! It only validates.
+          // So we must deduct it here.
+          // remainingDays is the authoritative available balance. HR can adjust
+          // it manually, so recalculating it from totalDays and usedDays can use
+          // stale data and incorrectly reject a valid CEO approval.
+          const newRemainingDays = leaveBalance.remainingDays - request.totalDays;
+
+          if (newRemainingDays < 0) {
+            throw new BadRequestException('Insufficient leave balance');
+          }
+
+          const newUsedDays = leaveBalance.totalDays - newRemainingDays;
+
+          await prisma.leaveBalance.update({
+            where: { id: leaveBalance.id },
+            data: {
+              usedDays: newUsedDays,
+              remainingDays: newRemainingDays
+            }
+          });
+        }
+      }
+
+      return updated;
+    }).then(async (updatedRequest) => {
+      try {
+        const employeeUser = await this.prisma.user.findUnique({
+          where: { id: request.employee.userId },
+          include: { role: true }
+        });
+        const statusText = nextStatus === 'APPROVED' ? 'อนุมัติ' : 'ปฏิเสธ';
+        const userRole = employeeUser?.role?.name?.toLowerCase() || 'user';
+        const redirectUrl = userRole === 'manager' 
+          ? '/dashboard/manager/history'
+          : userRole === 'hr'
+          ? '/dashboard/hr/leave-history'
+          : '/dashboard/user/history';
+
+        if (employeeUser?.id) {
+          await this.prisma.notification.create({
+            data: {
+              userId: employeeUser.id,
+              title: statusText === 'อนุมัติ' ? 'คำขอลาได้รับการอนุมัติจาก CEO' : 'คำขอลาถูกปฏิเสธโดย CEO',
+              message: `คำขอ${request.leaveType.name} ของคุณได้รับการ${statusText}โดย CEO เรียบร้อยแล้ว`,
+              type: statusText === 'อนุมัติ' ? 'APPROVE' : 'REJECT',
+              redirectUrl,
+            }
+          });
         }
 
-        return updated;
-      })
-      .then(async (updatedRequest) => {
-        try {
-          const employeeUser = await this.prisma.user.findUnique({
-            where: { id: request.employee.userId },
-            include: { role: true },
-          });
-          const statusText = nextStatus === 'APPROVED' ? 'อนุมัติ' : 'ปฏิเสธ';
-          const userRole = employeeUser?.role?.name?.toLowerCase() || 'user';
-          const redirectUrl =
-            userRole === 'manager'
-              ? '/dashboard/manager/history'
-              : userRole === 'hr'
-                ? '/dashboard/hr/leave-history'
-                : '/dashboard/user/history';
+        if (employeeUser?.email) {
+          this.notificationService.sendEmail(
+            employeeUser.email,
+            statusText === 'อนุมัติ' ? `[Leave Request] คำขอลางานของคุณได้รับการอนุมัติแล้ว` : `[Leave Request] คำขอลางานของคุณถูก${statusText}`,
+            `เรียน ${request.employee.firstName},\n\nคำขอลา${request.leaveType.name} ของคุณ (วันที่ ${request.startDate.toLocaleDateString()} ถึง ${request.endDate.toLocaleDateString()}) ได้ถูก${statusText}โดย CEO แล้ว\nหมายเหตุ: ${comment || '-'}\n\nคุณสามารถตรวจสอบสถานะได้ในระบบ`
+          );
+        }
 
-          if (employeeUser?.id) {
+        // --- Add HR Notifications ---
+        const hrs = await this.prisma.user.findMany({
+          where: { role: { name: 'HR' } }
+        });
+        for (const hr of hrs) {
+          if (hr.id) {
             await this.prisma.notification.create({
               data: {
-                userId: employeeUser.id,
-                title:
-                  statusText === 'อนุมัติ'
-                    ? 'คำขอลาได้รับการอนุมัติจาก CEO'
-                    : 'คำขอลาถูกปฏิเสธโดย CEO',
-                message: `คำขอ${request.leaveType.name} ของคุณได้รับการ${statusText}โดย CEO เรียบร้อยแล้ว`,
-                type: statusText === 'อนุมัติ' ? 'APPROVE' : 'REJECT',
-                redirectUrl,
-              },
+                userId: hr.id,
+                title: statusText === 'อนุมัติ' ? 'คำขอลาพนักงานได้รับการอนุมัติ' : 'การตรวจสอบคำขอลาโดยผู้บริหาร (CEO)',
+                message: `คำขอลา ${request.leaveType.name} ของ "${request.employee.firstName} ${request.employee.lastName}" ได้ถูก${statusText}โดยผู้บริหารแล้ว`,
+                type: 'SYSTEM',
+                redirectUrl: '/dashboard/hr/leave-history',
+              }
             });
           }
-
-          if (employeeUser?.email) {
+          if (hr.email) {
             this.notificationService.sendEmail(
-              employeeUser.email,
-              `[Leave Request] คำขอลางานของคุณถูก${statusText}`,
-              `เรียน ${request.employee.firstName},\n\nคำขอลา${request.leaveType.name} ของคุณ (วันที่ ${request.startDate.toLocaleDateString()} ถึง ${request.endDate.toLocaleDateString()}) ได้ถูก${statusText}โดย CEO แล้ว\nหมายเหตุ: ${comment || '-'}\n\nคุณสามารถตรวจสอบสถานะได้ในระบบ`,
+              hr.email,
+              statusText === 'อนุมัติ' ? `[Leave Request] คำขอลาพนักงานได้รับการอนุมัติแล้ว` : `[Leave Request] แจ้งเตือนการตรวจสอบคำขอลาโดยผู้บริหาร (CEO)`,
+              `เรียนฝ่ายบุคคล (HR),\n\nคำขอลา${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} ได้ถูก${statusText}โดยผู้บริหาร (CEO) แล้ว\nหมายเหตุ: ${comment || '-'}\n\nคุณสามารถตรวจสอบรายละเอียดได้ในระบบ`
             );
           }
-
-          // --- Add HR Notifications ---
-          const hrs = await this.prisma.user.findMany({
-            where: { role: { name: 'HR' } },
-          });
-          for (const hr of hrs) {
-            if (hr.id) {
-              await this.prisma.notification.create({
-                data: {
-                  userId: hr.id,
-                  title: 'การตรวจสอบคำขอลาโดยผู้บริหาร (CEO)',
-                  message: `คำขอลา ${request.leaveType.name} ของ "${request.employee.firstName} ${request.employee.lastName}" ได้ถูก${statusText}โดยผู้บริหารแล้ว`,
-                  type: 'SYSTEM',
-                  redirectUrl: '/dashboard/hr/leave-history',
-                },
-              });
-            }
-            if (hr.email) {
-              this.notificationService.sendEmail(
-                hr.email,
-                `[Leave Request] แจ้งเตือนการตรวจสอบคำขอลาโดยผู้บริหาร (CEO)`,
-                `เรียนฝ่ายบุคคล (HR),\n\nคำขอลา${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} ได้ถูก${statusText}โดยผู้บริหาร (CEO) แล้ว\nหมายเหตุ: ${comment || '-'}\n\nคุณสามารถตรวจสอบรายละเอียดได้ในระบบ`,
-              );
-            }
-          }
-          // ----------------------------
-        } catch (e) {
-          console.error('Failed to send ceo notification', e);
         }
-        return updatedRequest;
-      });
+        // ----------------------------
+
+      } catch (e) {
+        console.error('Failed to send ceo notification', e);
+      }
+      return updatedRequest;
+    });
   }
 
   async getPendingExecutive() {
@@ -490,13 +416,7 @@ export class CeoService {
             lastName: true,
             department: { select: { name: true } },
             position: { select: { name: true } },
-            user: {
-              select: {
-                id: true,
-                avatarUrl: true,
-                role: { select: { name: true } },
-              },
-            },
+            user: { select: { id: true, avatarUrl: true, role: { select: { name: true } } } },
           },
         },
         leaveType: true,
@@ -509,16 +429,10 @@ export class CeoService {
   async findAllEmployees() {
     const employees = await this.prisma.employee.findMany({
       include: {
-        user: {
-          select: {
-            email: true,
-            username: true,
-            role: { select: { name: true } },
-          },
-        },
+        user: { select: { email: true, username: true, role: { select: { name: true } } } },
         department: true,
         position: true,
-      },
+      }
     });
 
     return employees.map((e: any) => ({
@@ -530,7 +444,7 @@ export class CeoService {
       departmentName: e.department?.name || '',
       positionTitle: e.position?.name || '',
       positionName: e.position?.name || '',
-      status: 'active',
+      status: 'active'
     }));
   }
 }
