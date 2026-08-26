@@ -10,8 +10,20 @@ import * as fs from 'fs';
 export class ExportService {
   constructor(private prisma: PrismaService) {}
 
-  async exportToExcel(res: Response) {
+  async exportToExcel(res: Response, month?: number, year?: number) {
+    const where: any = {};
+    
+    if (year) {
+      const startDate = new Date(year, (month || 1) - 1, 1);
+      const endDate = new Date(year, month ? month : 12, 0, 23, 59, 59, 999);
+      where.startDate = {
+        gte: startDate,
+        lte: endDate,
+      };
+    }
+
     const leaves = await this.prisma.leaveRequest.findMany({
+      where,
       include: { employee: true, leaveType: true },
     });
 

@@ -1,4 +1,4 @@
-import { Controller, Get, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Res, UseGuards, Query } from '@nestjs/common';
 import { ExportService } from './export.service';
 import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -16,8 +16,16 @@ export class ExportController {
 
   @Get('excel')
   @ApiOperation({ summary: 'Export leave requests to Excel' })
-  exportExcel(@Res() res: Response) {
-    return this.exportService.exportToExcel(res);
+  exportExcel(
+    @Res() res: Response,
+    @Query('month') month?: string,
+    @Query('year') year?: string,
+  ) {
+    return this.exportService.exportToExcel(
+      res,
+      month ? parseInt(month) : undefined,
+      year ? parseInt(year) : undefined,
+    );
   }
 
   @Get('pdf')

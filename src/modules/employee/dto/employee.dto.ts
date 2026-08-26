@@ -1,5 +1,6 @@
-import { IsString, IsNotEmpty, IsDateString, IsOptional, IsInt, Min } from 'class-validator';
+import { IsString, IsNotEmpty, IsDateString, IsOptional, IsInt, Min, IsEnum } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { LeaveFormat } from '@prisma/client';
 
 export class CreateLeaveRequestDto {
   @ApiProperty()
@@ -43,20 +44,20 @@ export class CreateLeaveRequestDto {
   @IsOptional()
   hours?: number;
 
-  @ApiPropertyOptional()
-  @IsString()
+  @ApiPropertyOptional({ enum: LeaveFormat })
+  @IsEnum(LeaveFormat)
   @IsOptional()
-  period?: string;
+  period?: LeaveFormat;
 
-  @ApiPropertyOptional()
-  @IsString()
+  @ApiPropertyOptional({ enum: LeaveFormat })
+  @IsEnum(LeaveFormat)
   @IsOptional()
-  startFormat?: string;
+  startFormat?: LeaveFormat;
 
-  @ApiPropertyOptional()
-  @IsString()
+  @ApiPropertyOptional({ enum: LeaveFormat })
+  @IsEnum(LeaveFormat)
   @IsOptional()
-  endFormat?: string;
+  endFormat?: LeaveFormat;
 
   @ApiPropertyOptional()
   @Min(0.5)
@@ -110,20 +111,20 @@ export class UpdateLeaveRequestDto {
   @IsOptional()
   hours?: number;
 
-  @ApiPropertyOptional()
-  @IsString()
+  @ApiPropertyOptional({ enum: LeaveFormat })
+  @IsEnum(LeaveFormat)
   @IsOptional()
-  period?: string;
+  period?: LeaveFormat;
 
-  @ApiPropertyOptional()
-  @IsString()
+  @ApiPropertyOptional({ enum: LeaveFormat })
+  @IsEnum(LeaveFormat)
   @IsOptional()
-  startFormat?: string;
+  startFormat?: LeaveFormat;
 
-  @ApiPropertyOptional()
-  @IsString()
+  @ApiPropertyOptional({ enum: LeaveFormat })
+  @IsEnum(LeaveFormat)
   @IsOptional()
-  endFormat?: string;
+  endFormat?: LeaveFormat;
 
   @ApiPropertyOptional()
   @Min(0.5)

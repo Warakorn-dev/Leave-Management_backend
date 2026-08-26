@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { LeaveFormat } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { CreateLeaveRequestDto, UpdateLeaveRequestDto } from './dto/employee.dto';
 import { NotificationService } from '../notification/notification.service';
 import * as fs from 'fs';
@@ -70,8 +72,8 @@ export class EmployeeService {
         const diffMs = endDate.getTime() - startDate.getTime();
         const diffHours = diffMs / (1000 * 60 * 60);
 
-        dto.startFormat = 'hourly';
-        dto.endFormat = 'hourly';
+        dto.startFormat = LeaveFormat.hourly;
+        dto.endFormat = LeaveFormat.hourly;
         dto.leaveHours = diffHours;
       } else if ((dto.leaveMode === 'full_day' || dto.leaveMode === 'half_day') && dto.startDate && dto.endDate) {
         startDate = new Date(dto.startDate);
@@ -80,8 +82,8 @@ export class EmployeeService {
           dto.startFormat = dto.period;
           dto.endFormat = dto.period;
         } else {
-          dto.startFormat = 'full';
-          dto.endFormat = 'full';
+          dto.startFormat = LeaveFormat.full;
+          dto.endFormat = LeaveFormat.full;
         }
       } else {
         throw new BadRequestException('Incomplete data for the selected leave mode');
@@ -105,9 +107,10 @@ export class EmployeeService {
       }
     });
 
+    return await this.prisma.$transaction(async (prisma) => {
     // Check Leave Balance
     const currentYear = new Date().getFullYear();
-    const balance = await this.prisma.leaveBalance.findUnique({
+    const balance = await prisma.leaveBalance.findUnique({
       where: {
         employeeId_leaveTypeId_year: {
           employeeId: employee.id,
@@ -151,7 +154,7 @@ export class EmployeeService {
       }
     }
 
-    const pendingLeave = await this.prisma.leaveRequest.aggregate({
+    const pendingLeave = await prisma.leaveRequest.aggregate({
       where: {
         employeeId: employee.id,
         leaveTypeId: dto.leaveTypeId,
@@ -176,7 +179,7 @@ export class EmployeeService {
     }
 
     // --- OVERLAP VALIDATION ---
-    const existingRequests = await this.prisma.leaveRequest.findMany({
+    const existingRequests = await prisma.leaveRequest.findMany({
       where: {
         employeeId: employee.id,
         status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] }
@@ -185,7 +188,7 @@ export class EmployeeService {
 
     for (const req of existingRequests) {
       if (this.checkLeaveOverlap(
-        { startDate, endDate, startFormat: dto.startFormat || 'full', endFormat: dto.endFormat || 'full', leaveMode: dto.leaveMode },
+        { startDate, endDate, startFormat: dto.startFormat || LeaveFormat.full, endFormat: dto.endFormat || LeaveFormat.full, leaveMode: dto.leaveMode },
         { startDate: req.startDate, endDate: req.endDate, startFormat: req.startFormat, endFormat: req.endFormat }
       )) {
         throw new BadRequestException('คุณมีการลางานในช่วงวันที่/เวลานี้อยู่แล้ว ไม่สามารถยื่นคำขอลาซ้ำซ้อนได้');
@@ -198,7 +201,7 @@ export class EmployeeService {
 
     // 1. ลาป่วย
     if (leaveTypeName === 'ลาป่วย') {
-      const prev = await this.prisma.leaveRequest.aggregate({
+      const prev = await prisma.leaveRequest.aggregate({
         where: { 
           employeeId: employee.id, 
           leaveTypeId: dto.leaveTypeId, 
@@ -232,7 +235,7 @@ export class EmployeeService {
     }
     // 3. ลาเพื่อรับราชการทหาร
     else if (leaveTypeName.includes('ทหาร')) {
-      const prev = await this.prisma.leaveRequest.aggregate({
+      const prev = await prisma.leaveRequest.aggregate({
         where: { 
           employeeId: employee.id, 
           leaveTypeId: dto.leaveTypeId, 
@@ -272,7 +275,7 @@ export class EmployeeService {
     const yearStart = new Date(`${buddhistYear - 543}-01-01T00:00:00.000Z`);
     const yearEnd = new Date(`${buddhistYear - 543 + 1}-01-01T00:00:00.000Z`);
 
-    const allRequests = await this.prisma.leaveRequest.findMany({
+    const allRequests = await prisma.leaveRequest.findMany({
       where: {
         requestCode: { endsWith: `-${buddhistYear}` },
         createdAt: { gte: yearStart, lt: yearEnd },
@@ -303,15 +306,15 @@ export class EmployeeService {
     const initialStatus = 'PENDING_VERIFY';
 
     // Create Leave Request
-    const leaveRequest = await this.prisma.leaveRequest.create({
+    const leaveRequest = await prisma.leaveRequest.create({
       data: {
         requestCode,
         employeeId: employee.id,
         leaveTypeId: dto.leaveTypeId,
         startDate: startDate,
         endDate: endDate,
-        startFormat: dto.startFormat || 'full',
-        endFormat: dto.endFormat || 'full',
+        startFormat: dto.startFormat || LeaveFormat.full,
+        endFormat: dto.endFormat || LeaveFormat.full,
         totalDays: calculatedDays,
         paidDays: paidDays,
         unpaidDays: unpaidDays,
@@ -346,13 +349,13 @@ export class EmployeeService {
       }
 
       if (leaveRequest.status === 'PENDING_VERIFY') {
-        const hrs = await this.prisma.employee.findMany({
+        const hrs = await prisma.employee.findMany({
           where: { user: { role: { name: 'HR' } } },
           include: { user: true }
         });
         for (const hr of hrs) {
           if (hr.user?.id) {
-            await this.prisma.notification.create({
+            await prisma.notification.create({
               data: {
                 userId: hr.user.id,
                 title: 'มีคำขอลาใหม่รอตรวจสอบ',
@@ -371,7 +374,7 @@ export class EmployeeService {
           }
         }
       } else if (leaveRequest.status === 'PENDING_SUPERVISOR') {
-        const managers = await this.prisma.employee.findMany({
+        const managers = await prisma.employee.findMany({
           where: { 
             departmentId: employee.departmentId, 
             user: { role: { name: 'Manager' } }
@@ -380,7 +383,7 @@ export class EmployeeService {
         });
         for (const manager of managers) {
           if (manager.user?.id) {
-            await this.prisma.notification.create({
+            await prisma.notification.create({
               data: {
                 userId: manager.user.id,
                 title: 'มีคำขอลาใหม่ในแผนก',
@@ -399,12 +402,12 @@ export class EmployeeService {
           }
         }
       } else if (leaveRequest.status === 'PENDING_EXECUTIVE') {
-        const ceos = await this.prisma.user.findMany({
+        const ceos = await prisma.user.findMany({
           where: { role: { name: 'CEO' } }
         });
         for (const ceo of ceos) {
           if (ceo.id) {
-            await this.prisma.notification.create({
+            await prisma.notification.create({
               data: {
                 userId: ceo.id,
                 title: 'มีคำขอลาจากผู้จัดการแผนก',
@@ -428,6 +431,7 @@ export class EmployeeService {
     }
 
     return leaveRequest;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async updateLeaveRequest(userId: string, requestId: string, dto: UpdateLeaveRequestDto) {
@@ -473,8 +477,8 @@ export class EmployeeService {
         const diffMs = newEndDate.getTime() - newStartDate.getTime();
         const diffHours = diffMs / (1000 * 60 * 60);
 
-        dto.startFormat = 'hourly';
-        dto.endFormat = 'hourly';
+        dto.startFormat = LeaveFormat.hourly;
+        dto.endFormat = LeaveFormat.hourly;
         dto.leaveHours = diffHours;
       } else if ((dto.leaveMode === 'full_day' || dto.leaveMode === 'half_day') && dto.startDate && dto.endDate) {
         newStartDate = new Date(dto.startDate);
@@ -483,8 +487,8 @@ export class EmployeeService {
           dto.startFormat = dto.period;
           dto.endFormat = dto.period;
         } else {
-          dto.startFormat = 'full';
-          dto.endFormat = 'full';
+          dto.startFormat = LeaveFormat.full;
+          dto.endFormat = LeaveFormat.full;
         }
       } else {
         throw new BadRequestException('Incomplete data for the selected leave mode');
@@ -572,7 +576,7 @@ export class EmployeeService {
 
       for (const req of existingRequests) {
         if (this.checkLeaveOverlap(
-          { startDate: newStartDate, endDate: newEndDate, startFormat: dto.startFormat || request.startFormat || 'full', endFormat: dto.endFormat || request.endFormat || 'full', leaveMode: dto.leaveMode },
+          { startDate: newStartDate, endDate: newEndDate, startFormat: dto.startFormat || request.startFormat || LeaveFormat.full, endFormat: dto.endFormat || request.endFormat || LeaveFormat.full, leaveMode: dto.leaveMode },
           { startDate: req.startDate, endDate: req.endDate, startFormat: req.startFormat, endFormat: req.endFormat }
         )) {
           throw new BadRequestException('คุณมีการลางานในช่วงวันที่/เวลานี้อยู่แล้ว ไม่สามารถแก้ไขคำขอลาให้ซ้ำซ้อนได้');

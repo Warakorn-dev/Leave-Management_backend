@@ -342,20 +342,17 @@ export class HrService {
       }
     });
 
-    try {
-      await this.prisma.auditLog.create({
-        data: {
-          id: require('crypto').randomUUID(),
-          action: active ? 'ENABLE_USER' : 'DISABLE_USER',
-          entity: 'User',
-          entityId: employee.userId,
-          details: `User status changed to ${active ? 'active' : 'inactive'}`,
-          updatedAt: new Date()
-        }
-      });
-    } catch (e) {
-      console.log('Failed to create audit log', e);
-    }
+    // Fire and forget asynchronous audit log
+    this.prisma.auditLog.create({
+      data: {
+        id: require('crypto').randomUUID(),
+        action: active ? 'ENABLE_USER' : 'DISABLE_USER',
+        entity: 'User',
+        entityId: employee.userId,
+        details: `User status changed to ${active ? 'active' : 'inactive'}`,
+        updatedAt: new Date()
+      }
+    }).catch(e => console.log('Failed to create audit log asynchronously', e));
 
     return { success: true, isActive: active };
   }
