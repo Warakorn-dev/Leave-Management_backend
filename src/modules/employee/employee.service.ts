@@ -1,24 +1,48 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { CreateLeaveRequestDto, UpdateLeaveRequestDto } from './dto/employee.dto';
+import {
+  CreateLeaveRequestDto,
+  UpdateLeaveRequestDto,
+} from './dto/employee.dto';
 import { NotificationService } from '../notification/notification.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
 @Injectable()
 export class EmployeeService {
-  constructor(private prisma: PrismaService, private notificationService: NotificationService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationService: NotificationService,
+  ) {}
 
   private checkLeaveOverlap(
-    newReq: { startDate: Date; endDate: Date; startFormat: string; endFormat: string; leaveMode?: string },
-    existingReq: { startDate: Date; endDate: Date; startFormat: string; endFormat: string; leaveMode?: string }
+    newReq: {
+      startDate: Date;
+      endDate: Date;
+      startFormat: string;
+      endFormat: string;
+      leaveMode?: string;
+    },
+    existingReq: {
+      startDate: Date;
+      endDate: Date;
+      startFormat: string;
+      endFormat: string;
+      leaveMode?: string;
+    },
   ): boolean {
     const getRange = (req: any) => {
       let start = new Date(req.startDate).getTime();
       let end = new Date(req.endDate).getTime();
-      
-      const isHourly = req.startFormat === 'hourly' || req.leaveMode === 'hourly';
-      
+
+      const isHourly =
+        req.startFormat === 'hourly' || req.leaveMode === 'hourly';
+
       if (!isHourly) {
         const dStart = new Date(start);
         dStart.setHours(0, 0, 0, 0);
@@ -27,11 +51,11 @@ export class EmployeeService {
         const dEnd = new Date(end);
         dEnd.setHours(23, 59, 59, 999);
         end = dEnd.getTime();
-        
+
         // Single day half-day adjustment
         const dStartOnlyDate = new Date(dStart).setHours(0, 0, 0, 0);
         const dEndOnlyDate = new Date(dEnd).setHours(0, 0, 0, 0);
-        
+
         if (dStartOnlyDate === dEndOnlyDate) {
           if (req.startFormat === 'morning') {
             end = new Date(dStart).setHours(12, 0, 0, 0);
@@ -49,31 +73,39 @@ export class EmployeeService {
     return r1.start < r2.end && r1.end > r2.start;
   }
 
-
   async createLeaveRequest(userId: string, dto: CreateLeaveRequestDto) {
     const employee = await this.getEmployeeByUserId(userId);
 
     let startDate: Date;
     let endDate: Date;
-    
+
     // Map new payload format (leaveMode) if provided
     // Map new payload format (leaveMode) if provided
     if (dto.leaveMode) {
-      if (dto.leaveMode === 'hourly' && dto.leaveDate && dto.startTime && dto.endTime) {
+      if (
+        dto.leaveMode === 'hourly' &&
+        dto.leaveDate &&
+        dto.startTime &&
+        dto.endTime
+      ) {
         startDate = new Date(dto.leaveDate + 'T' + dto.startTime + ':00');
         endDate = new Date(dto.leaveDate + 'T' + dto.endTime + ':00');
-        
+
         if (endDate <= startDate) {
           throw new BadRequestException('End time must be after start time');
         }
-        
+
         const diffMs = endDate.getTime() - startDate.getTime();
         const diffHours = diffMs / (1000 * 60 * 60);
 
         dto.startFormat = 'hourly';
         dto.endFormat = 'hourly';
         dto.leaveHours = diffHours;
-      } else if ((dto.leaveMode === 'full_day' || dto.leaveMode === 'half_day') && dto.startDate && dto.endDate) {
+      } else if (
+        (dto.leaveMode === 'full_day' || dto.leaveMode === 'half_day') &&
+        dto.startDate &&
+        dto.endDate
+      ) {
         startDate = new Date(dto.startDate);
         endDate = new Date(dto.endDate);
         if (dto.period && dto.leaveMode === 'half_day') {
@@ -84,16 +116,20 @@ export class EmployeeService {
           dto.endFormat = 'full';
         }
       } else {
-        throw new BadRequestException('Incomplete data for the selected leave mode');
+        throw new BadRequestException(
+          'Incomplete data for the selected leave mode',
+        );
       }
     } else {
       // Fallback for old payload format
       startDate = new Date(dto.startDate!);
       endDate = new Date(dto.endDate!);
     }
-    
+
     if (startDate > endDate) {
-      throw new BadRequestException('Start date must be before or equal to end date');
+      throw new BadRequestException(
+        'Start date must be before or equal to end date',
+      );
     }
 
     const holidays = await this.prisma.publicHoliday.findMany({
@@ -101,8 +137,8 @@ export class EmployeeService {
         date: {
           gte: startDate,
           lte: endDate,
-        }
-      }
+        },
+      },
     });
 
     // Check Leave Balance
@@ -113,11 +149,11 @@ export class EmployeeService {
           employeeId: employee.id,
           leaveTypeId: dto.leaveTypeId,
           year: currentYear,
-        }
+        },
       },
       include: {
         leaveType: true,
-      }
+      },
     });
 
     if (!balance) {
@@ -128,15 +164,17 @@ export class EmployeeService {
     if (advanceNoticeDays > 0) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       const startDay = new Date(startDate);
       startDay.setHours(0, 0, 0, 0);
 
       const diffTime = startDay.getTime() - today.getTime();
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
+
       if (diffDays < advanceNoticeDays) {
-        throw new BadRequestException(`ต้องยื่นล่วงหน้าอย่างน้อย ${advanceNoticeDays} วัน (Requires ${advanceNoticeDays} days advance notice)`);
+        throw new BadRequestException(
+          `ต้องยื่นล่วงหน้าอย่างน้อย ${advanceNoticeDays} วัน (Requires ${advanceNoticeDays} days advance notice)`,
+        );
       }
     }
 
@@ -145,9 +183,11 @@ export class EmployeeService {
       const joinDate = new Date(employee.hireDate);
       const diffTime = startDate.getTime() - joinDate.getTime();
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
+
       if (diffDays < minTenureDays) {
-        throw new BadRequestException(`ต้องมีอายุงานอย่างน้อย ${minTenureDays} วัน (Requires at least ${minTenureDays} days of tenure)`);
+        throw new BadRequestException(
+          `ต้องมีอายุงานอย่างน้อย ${minTenureDays} วัน (Requires at least ${minTenureDays} days of tenure)`,
+        );
       }
     }
 
@@ -155,40 +195,75 @@ export class EmployeeService {
       where: {
         employeeId: employee.id,
         leaveTypeId: dto.leaveTypeId,
-        status: { in: ['PENDING_VERIFY', 'REVIEWING_HR', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'] },
-        startDate: { gte: new Date(`${currentYear}-01-01T00:00:00.000Z`) }
+        status: {
+          in: [
+            'PENDING_VERIFY',
+            'REVIEWING_HR',
+            'PENDING_SUPERVISOR',
+            'PENDING_EXECUTIVE',
+          ],
+        },
+        startDate: { gte: new Date(`${currentYear}-01-01T00:00:00.000Z`) },
       },
-      _sum: { totalDays: true }
+      _sum: { totalDays: true },
     });
     const pendingDays = pendingLeave._sum.totalDays || 0;
     const effectiveRemainingDays = balance.remainingDays - pendingDays;
 
     const leaveTypeName = balance.leaveType.name;
-    const isMaternityFemale = leaveTypeName.includes('คลอดบุตร') && employee.gender === 'Female';
-    const calculatedDays = this.calculateWorkingDays(startDate, endDate, holidays.map(h => h.date), dto.startFormat, dto.endFormat, isMaternityFemale, dto.leaveHours);
+    const isMaternityFemale =
+      leaveTypeName.includes('คลอดบุตร') && employee.gender === 'Female';
+    const calculatedDays = this.calculateWorkingDays(
+      startDate,
+      endDate,
+      holidays.map((h) => h.date),
+      dto.startFormat,
+      dto.endFormat,
+      isMaternityFemale,
+      dto.leaveHours,
+    );
 
     if (calculatedDays <= 0) {
-      throw new BadRequestException('จำนวนวันลาเป็น 0 (อาจตรงกับวันหยุดหรือเสาร์-อาทิตย์) กรุณาเลือกวันใหม่อีกครั้ง');
+      throw new BadRequestException(
+        'จำนวนวันลาเป็น 0 (อาจตรงกับวันหยุดหรือเสาร์-อาทิตย์) กรุณาเลือกวันใหม่อีกครั้ง',
+      );
     }
 
     if (effectiveRemainingDays < calculatedDays) {
-      throw new BadRequestException(`สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`);
+      throw new BadRequestException(
+        `สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`,
+      );
     }
 
     // --- OVERLAP VALIDATION ---
     const existingRequests = await this.prisma.leaveRequest.findMany({
       where: {
         employeeId: employee.id,
-        status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] }
-      }
+        status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
+      },
     });
 
     for (const req of existingRequests) {
-      if (this.checkLeaveOverlap(
-        { startDate, endDate, startFormat: dto.startFormat || 'full', endFormat: dto.endFormat || 'full', leaveMode: dto.leaveMode },
-        { startDate: req.startDate, endDate: req.endDate, startFormat: req.startFormat, endFormat: req.endFormat }
-      )) {
-        throw new BadRequestException('คุณมีการลางานในช่วงวันที่/เวลานี้อยู่แล้ว ไม่สามารถยื่นคำขอลาซ้ำซ้อนได้');
+      if (
+        this.checkLeaveOverlap(
+          {
+            startDate,
+            endDate,
+            startFormat: dto.startFormat || 'full',
+            endFormat: dto.endFormat || 'full',
+            leaveMode: dto.leaveMode,
+          },
+          {
+            startDate: req.startDate,
+            endDate: req.endDate,
+            startFormat: req.startFormat,
+            endFormat: req.endFormat,
+          },
+        )
+      ) {
+        throw new BadRequestException(
+          'คุณมีการลางานในช่วงวันที่/เวลานี้อยู่แล้ว ไม่สามารถยื่นคำขอลาซ้ำซ้อนได้',
+        );
       }
     }
     // -------------------------
@@ -199,47 +274,55 @@ export class EmployeeService {
     // 1. ลาป่วย
     if (leaveTypeName === 'ลาป่วย') {
       const prev = await this.prisma.leaveRequest.aggregate({
-        where: { 
-          employeeId: employee.id, 
-          leaveTypeId: dto.leaveTypeId, 
+        where: {
+          employeeId: employee.id,
+          leaveTypeId: dto.leaveTypeId,
           status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
-          startDate: { gte: new Date(`${currentYear}-01-01`) }
+          startDate: { gte: new Date(`${currentYear}-01-01`) },
         },
-        _sum: { paidDays: true }
+        _sum: { paidDays: true },
       });
       const usedPaid = prev._sum.paidDays || 0;
       paidDays = Math.min(calculatedDays, Math.max(0, 30 - usedPaid));
       unpaidDays = calculatedDays - paidDays;
-    } 
+    }
     // 2. ลาเพื่อคลอดบุตร
     else if (leaveTypeName.includes('คลอดบุตร')) {
       if (employee.gender === 'Female') {
-        if (calculatedDays > 135) throw new BadRequestException('สิทธิลาเพื่อคลอดบุตร สำหรับพนักงานหญิง ไม่เกิน 120 วัน (และลาเพิ่มได้อีก 15 วันหากมีใบรับรองแพทย์)');
-        
+        if (calculatedDays > 135)
+          throw new BadRequestException(
+            'สิทธิลาเพื่อคลอดบุตร สำหรับพนักงานหญิง ไม่เกิน 120 วัน (และลาเพิ่มได้อีก 15 วันหากมีใบรับรองแพทย์)',
+          );
+
         let extraPaid = 0;
         if (calculatedDays > 120) {
-           extraPaid = (calculatedDays - 120) * 0.5;
+          extraPaid = (calculatedDays - 120) * 0.5;
         }
         paidDays = Math.min(calculatedDays, 60) + extraPaid;
         unpaidDays = calculatedDays - paidDays;
       } else if (employee.gender === 'Male') {
-        if (calculatedDays > 15) throw new BadRequestException('สิทธิลาเพื่อช่วยเหลือภริยาคลอดบุตร สำหรับพนักงานชาย ไม่เกิน 15 วัน');
+        if (calculatedDays > 15)
+          throw new BadRequestException(
+            'สิทธิลาเพื่อช่วยเหลือภริยาคลอดบุตร สำหรับพนักงานชาย ไม่เกิน 15 วัน',
+          );
         paidDays = calculatedDays;
         unpaidDays = 0;
       } else {
-        throw new BadRequestException('ไม่ระบุเพศพนักงาน ไม่สามารถใช้สิทธิลาคลอดได้ โปรดติดต่อ HR');
+        throw new BadRequestException(
+          'ไม่ระบุเพศพนักงาน ไม่สามารถใช้สิทธิลาคลอดได้ โปรดติดต่อ HR',
+        );
       }
     }
     // 3. ลาเพื่อรับราชการทหาร
     else if (leaveTypeName.includes('ทหาร')) {
       const prev = await this.prisma.leaveRequest.aggregate({
-        where: { 
-          employeeId: employee.id, 
-          leaveTypeId: dto.leaveTypeId, 
+        where: {
+          employeeId: employee.id,
+          leaveTypeId: dto.leaveTypeId,
           status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
-          startDate: { gte: new Date(`${currentYear}-01-01`) }
+          startDate: { gte: new Date(`${currentYear}-01-01`) },
         },
-        _sum: { paidDays: true }
+        _sum: { paidDays: true },
       });
       const usedPaid = prev._sum.paidDays || 0;
       paidDays = Math.min(calculatedDays, Math.max(0, 60 - usedPaid));
@@ -248,12 +331,15 @@ export class EmployeeService {
     // 4. ลาพักผ่อนประจำปี (พักร้อน)
     else if (leaveTypeName === 'ลาพักผ่อนประจำปี (พักร้อน)') {
       const msInYear = 1000 * 60 * 60 * 24 * 365;
-      const workDurationMs = new Date().getTime() - new Date(employee.hireDate).getTime();
+      const workDurationMs =
+        new Date().getTime() - new Date(employee.hireDate).getTime();
       if (workDurationMs < msInYear) {
-        throw new BadRequestException('คุณต้องมีอายุงานครบ 1 ปี จึงจะสามารถใช้สิทธิลาพักผ่อนประจำปีได้');
+        throw new BadRequestException(
+          'คุณต้องมีอายุงานครบ 1 ปี จึงจะสามารถใช้สิทธิลาพักผ่อนประจำปีได้',
+        );
       }
       paidDays = calculatedDays;
-    } 
+    }
     // 4. ลาเพื่อทำหมัน
     else if (leaveTypeName.includes('ทำหมัน')) {
       paidDays = calculatedDays;
@@ -317,27 +403,52 @@ export class EmployeeService {
         unpaidDays: unpaidDays,
         reason: dto.reason,
         status: initialStatus,
-      }
+      },
     });
 
     // Notify Approver(s)
     try {
       let durationText = `${calculatedDays} วัน`;
-      if (dto.leaveMode === 'hourly' || dto.startFormat === 'hourly' || dto.leaveHours || (calculatedDays > 0 && calculatedDays < 0.5)) {
-        const hours = dto.leaveHours || Math.round(calculatedDays * 8 * 100) / 100;
+      if (
+        dto.leaveMode === 'hourly' ||
+        dto.startFormat === 'hourly' ||
+        dto.leaveHours ||
+        (calculatedDays > 0 && calculatedDays < 0.5)
+      ) {
+        const hours =
+          dto.leaveHours || Math.round(calculatedDays * 8 * 100) / 100;
         durationText = `${hours} ชั่วโมง`;
       } else if (dto.leaveMode === 'half_day' || calculatedDays === 0.5) {
-        const periodLabel = (dto.period === 'morning' || dto.startFormat === 'morning') ? 'ช่วงเช้า' : (dto.period === 'afternoon' || dto.startFormat === 'afternoon') ? 'ช่วงบ่าย' : 'ครึ่งวัน';
+        const periodLabel =
+          dto.period === 'morning' || dto.startFormat === 'morning'
+            ? 'ช่วงเช้า'
+            : dto.period === 'afternoon' || dto.startFormat === 'afternoon'
+              ? 'ช่วงบ่าย'
+              : 'ครึ่งวัน';
         durationText = `0.5 วัน (${periodLabel})`;
       }
 
-      const startDateStr = startDate.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
-      const endDateStr = endDate.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
-      
+      const startDateStr = startDate.toLocaleDateString('th-TH', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+      const endDateStr = endDate.toLocaleDateString('th-TH', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+
       let leaveTimeDetail = '';
       if (dto.leaveMode === 'hourly' || dto.startFormat === 'hourly') {
-        const startTimeStr = startDate.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-        const endTimeStr = endDate.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+        const startTimeStr = startDate.toLocaleTimeString('th-TH', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        const endTimeStr = endDate.toLocaleTimeString('th-TH', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
         leaveTimeDetail = `วันที่ ${startDateStr} เวลา ${startTimeStr} - ${endTimeStr} น.`;
       } else if (startDateStr === endDateStr) {
         leaveTimeDetail = `วันที่ ${startDateStr}`;
@@ -348,7 +459,7 @@ export class EmployeeService {
       if (leaveRequest.status === 'PENDING_VERIFY') {
         const hrs = await this.prisma.employee.findMany({
           where: { user: { role: { name: 'HR' } } },
-          include: { user: true }
+          include: { user: true },
         });
         for (const hr of hrs) {
           if (hr.user?.id) {
@@ -359,24 +470,24 @@ export class EmployeeService {
                 message: `พนักงาน "${employee.firstName} ${employee.lastName}" ได้ยื่นคำขอ ${leaveTypeName} (${durationText}) ${leaveTimeDetail}`,
                 type: 'NEW_ORDER',
                 redirectUrl: '/dashboard/hr/approval',
-              }
+              },
             });
           }
           if (hr.user?.email) {
-            this.notificationService.sendEmail(
+            await this.notificationService.sendEmail(
               hr.user.email,
               `[Leave Request] ${employee.firstName} ${employee.lastName} ได้ยื่นคำขอลางาน`,
-              `เรียน ${hr.firstName},\n\n${employee.firstName} ${employee.lastName} ได้ยื่นคำขอ${leaveTypeName} (${durationText}) ${leaveTimeDetail}\nเหตุผล: ${dto.reason}\n\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบ`
+              `เรียน ${hr.firstName},\n\n${employee.firstName} ${employee.lastName} ได้ยื่นคำขอ${leaveTypeName} (${durationText}) ${leaveTimeDetail}\nเหตุผล: ${dto.reason}\n\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบ`,
             );
           }
         }
       } else if (leaveRequest.status === 'PENDING_SUPERVISOR') {
         const managers = await this.prisma.employee.findMany({
-          where: { 
-            departmentId: employee.departmentId, 
-            user: { role: { name: 'Manager' } }
+          where: {
+            departmentId: employee.departmentId,
+            user: { role: { name: 'Manager' } },
           },
-          include: { user: true }
+          include: { user: true },
         });
         for (const manager of managers) {
           if (manager.user?.id) {
@@ -387,20 +498,20 @@ export class EmployeeService {
                 message: `พนักงาน "${employee.firstName} ${employee.lastName}" ได้ยื่นคำขอ ${leaveTypeName} (${durationText}) ${leaveTimeDetail}`,
                 type: 'NEW_ORDER',
                 redirectUrl: '/dashboard/manager/approval',
-              }
+              },
             });
           }
           if (manager.user?.email) {
-            this.notificationService.sendEmail(
+            await this.notificationService.sendEmail(
               manager.user.email,
               `[Leave Request] ${employee.firstName} ${employee.lastName} ได้ยื่นคำขอลางาน`,
-              `เรียน ${manager.firstName},\n\n${employee.firstName} ${employee.lastName} ได้ยื่นคำขอ${leaveTypeName} (${durationText}) ${leaveTimeDetail}\nเหตุผล: ${dto.reason}\n\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบและพิจารณา`
+              `เรียน ${manager.firstName},\n\n${employee.firstName} ${employee.lastName} ได้ยื่นคำขอ${leaveTypeName} (${durationText}) ${leaveTimeDetail}\nเหตุผล: ${dto.reason}\n\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบและพิจารณา`,
             );
           }
         }
       } else if (leaveRequest.status === 'PENDING_EXECUTIVE') {
         const ceos = await this.prisma.user.findMany({
-          where: { role: { name: 'CEO' } }
+          where: { role: { name: 'CEO' } },
         });
         for (const ceo of ceos) {
           if (ceo.id) {
@@ -411,14 +522,14 @@ export class EmployeeService {
                 message: `ผู้จัดการแผนก "${employee.firstName} ${employee.lastName}" ได้ยื่นคำขอ ${leaveTypeName} (${durationText}) ${leaveTimeDetail}`,
                 type: 'NEW_ORDER',
                 redirectUrl: '/dashboard/ceo/approval',
-              }
+              },
             });
           }
           if (ceo.email) {
-            this.notificationService.sendEmail(
+            await this.notificationService.sendEmail(
               ceo.email,
               `[Leave Request] ${employee.firstName} ${employee.lastName} ได้ยื่นคำขอลางาน`,
-              `เรียน CEO,\n\n${employee.firstName} ${employee.lastName} ได้ยื่นคำขอ${leaveTypeName} (${durationText}) ${leaveTimeDetail}\nเหตุผล: ${dto.reason}\n\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบและอนุมัติ`
+              `เรียน CEO,\n\n${employee.firstName} ${employee.lastName} ได้ยื่นคำขอ${leaveTypeName} (${durationText}) ${leaveTimeDetail}\nเหตุผล: ${dto.reason}\n\nกรุณาเข้าสู่ระบบเพื่อตรวจสอบและอนุมัติ`,
             );
           }
         }
@@ -430,7 +541,11 @@ export class EmployeeService {
     return leaveRequest;
   }
 
-  async updateLeaveRequest(userId: string, requestId: string, dto: UpdateLeaveRequestDto) {
+  async updateLeaveRequest(
+    userId: string,
+    requestId: string,
+    dto: UpdateLeaveRequestDto,
+  ) {
     const employee = await this.getEmployeeByUserId(userId);
     const request = await this.prisma.leaveRequest.findUnique({
       where: { id: requestId },
@@ -440,14 +555,23 @@ export class EmployeeService {
     if (!request) {
       throw new NotFoundException('Leave request not found');
     }
-    
-    if (request.employeeId !== employee.id && employee.user?.role?.name !== 'HR' && employee.user?.role?.name !== 'CEO' && employee.user?.role?.name !== 'MANAGER') {
-      throw new ForbiddenException('You do not have permission to update this leave request');
+
+    if (
+      request.employeeId !== employee.id &&
+      employee.user?.role?.name !== 'HR' &&
+      employee.user?.role?.name !== 'CEO' &&
+      employee.user?.role?.name !== 'MANAGER'
+    ) {
+      throw new ForbiddenException(
+        'You do not have permission to update this leave request',
+      );
     }
-    
+
     const allowedStatuses = ['PENDING_VERIFY', 'REVIEWING_HR'];
     if (!allowedStatuses.includes(request.status)) {
-      throw new ForbiddenException('สามารถแก้ไขข้อมูลได้เฉพาะคำขอที่ยังไม่ผ่านการตรวจสอบจาก HR เท่านั้น');
+      throw new ForbiddenException(
+        'สามารถแก้ไขข้อมูลได้เฉพาะคำขอที่ยังไม่ผ่านการตรวจสอบจาก HR เท่านั้น',
+      );
     }
 
     const dataToUpdate: any = { ...dto };
@@ -457,26 +581,35 @@ export class EmployeeService {
       dataToUpdate.currentHrReviewerId = null;
       dataToUpdate.hrReviewStartedAt = null;
     }
-    
+
     let newStartDate: Date;
     let newEndDate: Date;
 
     if (dto.leaveMode) {
-      if (dto.leaveMode === 'hourly' && dto.leaveDate && dto.startTime && dto.endTime) {
+      if (
+        dto.leaveMode === 'hourly' &&
+        dto.leaveDate &&
+        dto.startTime &&
+        dto.endTime
+      ) {
         newStartDate = new Date(dto.leaveDate + 'T' + dto.startTime + ':00');
         newEndDate = new Date(dto.leaveDate + 'T' + dto.endTime + ':00');
-        
+
         if (newEndDate <= newStartDate) {
           throw new BadRequestException('End time must be after start time');
         }
-        
+
         const diffMs = newEndDate.getTime() - newStartDate.getTime();
         const diffHours = diffMs / (1000 * 60 * 60);
 
         dto.startFormat = 'hourly';
         dto.endFormat = 'hourly';
         dto.leaveHours = diffHours;
-      } else if ((dto.leaveMode === 'full_day' || dto.leaveMode === 'half_day') && dto.startDate && dto.endDate) {
+      } else if (
+        (dto.leaveMode === 'full_day' || dto.leaveMode === 'half_day') &&
+        dto.startDate &&
+        dto.endDate
+      ) {
         newStartDate = new Date(dto.startDate);
         newEndDate = new Date(dto.endDate);
         if (dto.period && dto.leaveMode === 'half_day') {
@@ -487,16 +620,22 @@ export class EmployeeService {
           dto.endFormat = 'full';
         }
       } else {
-        throw new BadRequestException('Incomplete data for the selected leave mode');
+        throw new BadRequestException(
+          'Incomplete data for the selected leave mode',
+        );
       }
     } else {
-      newStartDate = dto.startDate ? new Date(dto.startDate) : request.startDate;
+      newStartDate = dto.startDate
+        ? new Date(dto.startDate)
+        : request.startDate;
       newEndDate = dto.endDate ? new Date(dto.endDate) : request.endDate;
     }
-    
+
     if (dto.startDate || dto.endDate || dto.leaveMode) {
       if (newStartDate > newEndDate) {
-        throw new BadRequestException('Start date must be before or equal to end date');
+        throw new BadRequestException(
+          'Start date must be before or equal to end date',
+        );
       }
 
       const holidays = await this.prisma.publicHoliday.findMany({
@@ -504,8 +643,8 @@ export class EmployeeService {
           date: {
             gte: newStartDate,
             lte: newEndDate,
-          }
-        }
+          },
+        },
       });
 
       const currentYear = new Date().getFullYear();
@@ -515,30 +654,33 @@ export class EmployeeService {
             employeeId: employee.id,
             leaveTypeId: request.leaveTypeId,
             year: currentYear,
-          }
+          },
         },
         include: {
           leaveType: true,
-        }
+        },
       });
 
       if (!balance) {
         throw new BadRequestException('Leave balance not found');
       }
 
-      const advanceNoticeDays = (balance.leaveType as any)?.advanceNoticeDays || 0;
+      const advanceNoticeDays =
+        (balance.leaveType as any)?.advanceNoticeDays || 0;
       if (advanceNoticeDays > 0) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         const startDay = new Date(newStartDate);
         startDay.setHours(0, 0, 0, 0);
 
         const diffTime = startDay.getTime() - today.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
+
         if (diffDays < advanceNoticeDays) {
-          throw new BadRequestException(`ต้องยื่นล่วงหน้าอย่างน้อย ${advanceNoticeDays} วัน (Requires ${advanceNoticeDays} days advance notice)`);
+          throw new BadRequestException(
+            `ต้องยื่นล่วงหน้าอย่างน้อย ${advanceNoticeDays} วัน (Requires ${advanceNoticeDays} days advance notice)`,
+          );
         }
       }
 
@@ -547,18 +689,31 @@ export class EmployeeService {
         const joinDate = new Date(employee.hireDate);
         const diffTime = newStartDate.getTime() - joinDate.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
+
         if (diffDays < minTenureDays) {
-          throw new BadRequestException(`ต้องมีอายุงานอย่างน้อย ${minTenureDays} วัน (Requires at least ${minTenureDays} days of tenure)`);
+          throw new BadRequestException(
+            `ต้องมีอายุงานอย่างน้อย ${minTenureDays} วัน (Requires at least ${minTenureDays} days of tenure)`,
+          );
         }
       }
 
       const leaveTypeName = balance.leaveType.name;
-      const isMaternityFemale = leaveTypeName.includes('คลอดบุตร') && employee.gender === 'Female';
+      const isMaternityFemale =
+        leaveTypeName.includes('คลอดบุตร') && employee.gender === 'Female';
 
-      const calculatedDays = this.calculateWorkingDays(newStartDate, newEndDate, holidays.map(h => h.date), dto.startFormat || request.startFormat, dto.endFormat || request.endFormat, isMaternityFemale, dto.leaveHours);
+      const calculatedDays = this.calculateWorkingDays(
+        newStartDate,
+        newEndDate,
+        holidays.map((h) => h.date),
+        dto.startFormat || request.startFormat,
+        dto.endFormat || request.endFormat,
+        isMaternityFemale,
+        dto.leaveHours,
+      );
       if (calculatedDays <= 0) {
-        throw new BadRequestException('จำนวนวันลาเป็น 0 (อาจตรงกับวันหยุดหรือเสาร์-อาทิตย์) กรุณาเลือกวันใหม่อีกครั้ง');
+        throw new BadRequestException(
+          'จำนวนวันลาเป็น 0 (อาจตรงกับวันหยุดหรือเสาร์-อาทิตย์) กรุณาเลือกวันใหม่อีกครั้ง',
+        );
       }
 
       // --- OVERLAP VALIDATION ---
@@ -566,16 +721,31 @@ export class EmployeeService {
         where: {
           employeeId: employee.id,
           id: { not: requestId },
-          status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] }
-        }
+          status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
+        },
       });
 
       for (const req of existingRequests) {
-        if (this.checkLeaveOverlap(
-          { startDate: newStartDate, endDate: newEndDate, startFormat: dto.startFormat || request.startFormat || 'full', endFormat: dto.endFormat || request.endFormat || 'full', leaveMode: dto.leaveMode },
-          { startDate: req.startDate, endDate: req.endDate, startFormat: req.startFormat, endFormat: req.endFormat }
-        )) {
-          throw new BadRequestException('คุณมีการลางานในช่วงวันที่/เวลานี้อยู่แล้ว ไม่สามารถแก้ไขคำขอลาให้ซ้ำซ้อนได้');
+        if (
+          this.checkLeaveOverlap(
+            {
+              startDate: newStartDate,
+              endDate: newEndDate,
+              startFormat: dto.startFormat || request.startFormat || 'full',
+              endFormat: dto.endFormat || request.endFormat || 'full',
+              leaveMode: dto.leaveMode,
+            },
+            {
+              startDate: req.startDate,
+              endDate: req.endDate,
+              startFormat: req.startFormat,
+              endFormat: req.endFormat,
+            },
+          )
+        ) {
+          throw new BadRequestException(
+            'คุณมีการลางานในช่วงวันที่/เวลานี้อยู่แล้ว ไม่สามารถแก้ไขคำขอลาให้ซ้ำซ้อนได้',
+          );
         }
       }
       // -------------------------
@@ -584,17 +754,26 @@ export class EmployeeService {
         where: {
           employeeId: employee.id,
           leaveTypeId: request.leaveTypeId,
-          status: { in: ['PENDING_VERIFY', 'REVIEWING_HR', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'] },
+          status: {
+            in: [
+              'PENDING_VERIFY',
+              'REVIEWING_HR',
+              'PENDING_SUPERVISOR',
+              'PENDING_EXECUTIVE',
+            ],
+          },
           startDate: { gte: new Date(`${currentYear}-01-01T00:00:00.000Z`) },
-          id: { not: requestId }
+          id: { not: requestId },
         },
-        _sum: { totalDays: true }
+        _sum: { totalDays: true },
       });
       const pendingDays = pendingLeave._sum.totalDays || 0;
       const effectiveRemainingDays = balance.remainingDays - pendingDays;
 
       if (effectiveRemainingDays < calculatedDays) {
-        throw new BadRequestException(`สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`);
+        throw new BadRequestException(
+          `สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`,
+        );
       }
 
       let paidDays = calculatedDays;
@@ -603,32 +782,40 @@ export class EmployeeService {
       // 1. ลาป่วย
       if (leaveTypeName === 'ลาป่วย') {
         const prev = await this.prisma.leaveRequest.aggregate({
-          where: { 
-            employeeId: employee.id, 
-            leaveTypeId: request.leaveTypeId, 
-            status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
+          where: {
+            employeeId: employee.id,
+            leaveTypeId: request.leaveTypeId,
+            status: {
+              notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'],
+            },
             startDate: { gte: new Date(`${currentYear}-01-01`) },
-            id: { not: requestId }
+            id: { not: requestId },
           },
-          _sum: { paidDays: true }
+          _sum: { paidDays: true },
         });
         const usedPaid = prev._sum.paidDays || 0;
         paidDays = Math.min(calculatedDays, Math.max(0, 30 - usedPaid));
         unpaidDays = calculatedDays - paidDays;
-      } 
+      }
       // 2. ลาเพื่อคลอดบุตร
       else if (leaveTypeName.includes('คลอดบุตร')) {
         if (employee.gender === 'Female') {
-          if (calculatedDays > 135) throw new BadRequestException('สิทธิลาเพื่อคลอดบุตร สำหรับพนักงานหญิง ไม่เกิน 120 วัน (และลาเพิ่มได้อีก 15 วันหากมีใบรับรองแพทย์)');
-          
+          if (calculatedDays > 135)
+            throw new BadRequestException(
+              'สิทธิลาเพื่อคลอดบุตร สำหรับพนักงานหญิง ไม่เกิน 120 วัน (และลาเพิ่มได้อีก 15 วันหากมีใบรับรองแพทย์)',
+            );
+
           let extraPaid = 0;
           if (calculatedDays > 120) {
-             extraPaid = (calculatedDays - 120) * 0.5;
+            extraPaid = (calculatedDays - 120) * 0.5;
           }
           paidDays = Math.min(calculatedDays, 60) + extraPaid;
           unpaidDays = calculatedDays - paidDays;
         } else if (employee.gender === 'Male') {
-          if (calculatedDays > 15) throw new BadRequestException('สิทธิลาเพื่อช่วยเหลือภริยาคลอดบุตร สำหรับพนักงานชาย ไม่เกิน 15 วัน');
+          if (calculatedDays > 15)
+            throw new BadRequestException(
+              'สิทธิลาเพื่อช่วยเหลือภริยาคลอดบุตร สำหรับพนักงานชาย ไม่เกิน 15 วัน',
+            );
           paidDays = calculatedDays;
           unpaidDays = 0;
         }
@@ -636,14 +823,16 @@ export class EmployeeService {
       // 3. ลาเพื่อรับราชการทหาร
       else if (leaveTypeName.includes('ทหาร')) {
         const prev = await this.prisma.leaveRequest.aggregate({
-          where: { 
-            employeeId: employee.id, 
-            leaveTypeId: request.leaveTypeId, 
-            status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
+          where: {
+            employeeId: employee.id,
+            leaveTypeId: request.leaveTypeId,
+            status: {
+              notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'],
+            },
             startDate: { gte: new Date(`${currentYear}-01-01`) },
-            id: { not: requestId }
+            id: { not: requestId },
           },
-          _sum: { paidDays: true }
+          _sum: { paidDays: true },
         });
         const usedPaid = prev._sum.paidDays || 0;
         paidDays = Math.min(calculatedDays, Math.max(0, 60 - usedPaid));
@@ -652,12 +841,15 @@ export class EmployeeService {
       // 4. ลาพักผ่อนประจำปี (พักร้อน)
       else if (leaveTypeName === 'ลาพักผ่อนประจำปี (พักร้อน)') {
         const msInYear = 1000 * 60 * 60 * 24 * 365;
-        const workDurationMs = new Date().getTime() - new Date(employee.hireDate).getTime();
+        const workDurationMs =
+          new Date().getTime() - new Date(employee.hireDate).getTime();
         if (workDurationMs < msInYear) {
-          throw new BadRequestException('คุณต้องมีอายุงานครบ 1 ปี จึงจะสามารถใช้สิทธิลาพักผ่อนประจำปีได้');
+          throw new BadRequestException(
+            'คุณต้องมีอายุงานครบ 1 ปี จึงจะสามารถใช้สิทธิลาพักผ่อนประจำปีได้',
+          );
         }
         paidDays = calculatedDays;
-      } 
+      }
       // 5. ลาเพื่อทำหมัน
       else if (leaveTypeName.includes('ทำหมัน')) {
         paidDays = calculatedDays;
@@ -667,7 +859,7 @@ export class EmployeeService {
       else {
         paidDays = calculatedDays;
       }
-      
+
       dataToUpdate.totalDays = calculatedDays;
       dataToUpdate.paidDays = paidDays;
       dataToUpdate.unpaidDays = unpaidDays;
@@ -703,11 +895,22 @@ export class EmployeeService {
     }
 
     if (request.status === 'PENDING_CANCELLATION') {
-      throw new ForbiddenException('Cancellation request is already waiting for HR review');
+      throw new ForbiddenException(
+        'Cancellation request is already waiting for HR review',
+      );
     }
 
-    if (!['PENDING_VERIFY', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE', 'APPROVED'].includes(request.status)) {
-      throw new ForbiddenException('Only active leave requests can be cancelled');
+    if (
+      ![
+        'PENDING_VERIFY',
+        'PENDING_SUPERVISOR',
+        'PENDING_EXECUTIVE',
+        'APPROVED',
+      ].includes(request.status)
+    ) {
+      throw new ForbiddenException(
+        'Only active leave requests can be cancelled',
+      );
     }
 
     if (request.status === 'APPROVED') {
@@ -716,7 +919,9 @@ export class EmployeeService {
       const startDay = new Date(request.startDate);
       startDay.setHours(0, 0, 0, 0);
       if (startDay <= today) {
-        throw new ForbiddenException('Cannot cancel an approved leave on or after its start date');
+        throw new ForbiddenException(
+          'Cannot cancel an approved leave on or after its start date',
+        );
       }
     }
 
@@ -745,7 +950,7 @@ export class EmployeeService {
         });
 
         if (hr.user.email) {
-          this.notificationService.sendEmail(
+          await this.notificationService.sendEmail(
             hr.user.email,
             '[Leave Cancellation] รอตรวจสอบ',
             `${request.employee.firstName} ${request.employee.lastName} ขอยกเลิก${request.leaveType.name}`,
@@ -769,34 +974,38 @@ export class EmployeeService {
       include: {
         department: { select: { name: true } },
         position: { select: { name: true } },
-        user: { 
-          select: { 
+        user: {
+          select: {
             email: true,
             avatarUrl: true,
-            role: { select: { name: true } }
-          } 
-        }
-      }
+            role: { select: { name: true } },
+          },
+        },
+      },
     });
-    
+
     if (!employee) {
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
-        include: { role: true }
+        include: { role: true },
       });
       if (!user) throw new NotFoundException('User not found');
       return user;
     }
-    
+
     return employee;
   }
 
   async updateAvatar(userId: string, avatarUrl: string) {
-    const oldUser = await this.prisma.user.findUnique({ where: { id: userId } });
-    
+    const oldUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
     if (oldUser?.avatarUrl && oldUser.avatarUrl !== avatarUrl) {
       try {
-        const relativePath = oldUser.avatarUrl.startsWith('/') ? oldUser.avatarUrl.substring(1) : oldUser.avatarUrl;
+        const relativePath = oldUser.avatarUrl.startsWith('/')
+          ? oldUser.avatarUrl.substring(1)
+          : oldUser.avatarUrl;
         const filePath = path.join(process.cwd(), relativePath);
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
@@ -810,7 +1019,11 @@ export class EmployeeService {
       where: { id: userId },
       data: { avatarUrl },
     });
-    return { success: true, message: 'Avatar updated successfully', avatarUrl: user.avatarUrl };
+    return {
+      success: true,
+      message: 'Avatar updated successfully',
+      avatarUrl: user.avatarUrl,
+    };
   }
 
   async getLeaveHistory(userId: string) {
@@ -821,22 +1034,28 @@ export class EmployeeService {
       include: {
         leaveType: true,
         attachments: true,
-        employee: { 
-          select: { 
+        employee: {
+          select: {
             id: true,
             employeeCode: true,
             title: true,
-            firstName: true, 
+            firstName: true,
             lastName: true,
             department: { select: { name: true } },
             position: { select: { name: true } },
-            user: { select: { id: true, avatarUrl: true, role: { select: { name: true } } } }
-          } 
+            user: {
+              select: {
+                id: true,
+                avatarUrl: true,
+                role: { select: { name: true } },
+              },
+            },
+          },
         },
         approvals: {
-          orderBy: { createdAt: 'desc' }
-        }
-      }
+          orderBy: { createdAt: 'desc' },
+        },
+      },
     });
   }
 
@@ -845,60 +1064,69 @@ export class EmployeeService {
     if (!employee.departmentId) return [];
 
     return this.prisma.leaveRequest.findMany({
-      where: { 
-        employee: { departmentId: employee.departmentId } 
+      where: {
+        employee: { departmentId: employee.departmentId },
       },
       orderBy: { createdAt: 'desc' },
       include: {
         leaveType: true,
         attachments: true,
-        employee: { 
-          select: { 
+        employee: {
+          select: {
             id: true,
             employeeCode: true,
             title: true,
-            firstName: true, 
+            firstName: true,
             lastName: true,
             department: { select: { name: true } },
             position: { select: { name: true } },
-            user: { select: { id: true, avatarUrl: true, role: { select: { name: true } } } }
-          } 
+            user: {
+              select: {
+                id: true,
+                avatarUrl: true,
+                role: { select: { name: true } },
+              },
+            },
+          },
         },
         approvals: {
-          orderBy: { createdAt: 'desc' }
-        }
-      }
+          orderBy: { createdAt: 'desc' },
+        },
+      },
     });
   }
 
   async getAllCompanyLeaves() {
     return this.prisma.leaveRequest.findMany({
       where: {
-        OR: [
-          { status: 'APPROVED' },
-          { status: 'Approved' },
-        ]
+        OR: [{ status: 'APPROVED' }, { status: 'Approved' }],
       },
       orderBy: { createdAt: 'desc' },
       include: {
         leaveType: true,
         attachments: true,
-        employee: { 
-          select: { 
+        employee: {
+          select: {
             id: true,
             employeeCode: true,
             title: true,
-            firstName: true, 
+            firstName: true,
             lastName: true,
             department: { select: { name: true } },
             position: { select: { name: true } },
-            user: { select: { id: true, avatarUrl: true, role: { select: { name: true } } } }
-          } 
+            user: {
+              select: {
+                id: true,
+                avatarUrl: true,
+                role: { select: { name: true } },
+              },
+            },
+          },
         },
         approvals: {
-          orderBy: { createdAt: 'desc' }
-        }
-      }
+          orderBy: { createdAt: 'desc' },
+        },
+      },
     });
   }
 
@@ -907,31 +1135,38 @@ export class EmployeeService {
     const currentYear = new Date().getFullYear();
     const balances = await this.prisma.leaveBalance.findMany({
       where: { employeeId: employee.id, year: currentYear },
-      include: { leaveType: true }
+      include: { leaveType: true },
     });
 
     const pendingLeaves = await this.prisma.leaveRequest.groupBy({
       by: ['leaveTypeId'],
       where: {
         employeeId: employee.id,
-        status: { in: ['PENDING_VERIFY', 'REVIEWING_HR', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'] },
-        startDate: { gte: new Date(`${currentYear}-01-01T00:00:00.000Z`) }
+        status: {
+          in: [
+            'PENDING_VERIFY',
+            'REVIEWING_HR',
+            'PENDING_SUPERVISOR',
+            'PENDING_EXECUTIVE',
+          ],
+        },
+        startDate: { gte: new Date(`${currentYear}-01-01T00:00:00.000Z`) },
       },
-      _sum: { totalDays: true }
+      _sum: { totalDays: true },
     });
 
     const pendingMap: Record<string, number> = {};
-    pendingLeaves.forEach(p => {
+    pendingLeaves.forEach((p) => {
       pendingMap[p.leaveTypeId] = p._sum.totalDays || 0;
     });
 
-    return balances.map(balance => {
+    return balances.map((balance) => {
       const pendingDays = pendingMap[balance.leaveTypeId] || 0;
       return {
         ...balance,
         pendingDays,
         effectiveRemainingDays: balance.remainingDays - pendingDays,
-        employeeHireDate: employee.hireDate
+        employeeHireDate: employee.hireDate,
       };
     });
   }
@@ -942,17 +1177,28 @@ export class EmployeeService {
 
     const balances = await this.prisma.leaveBalance.findMany({
       where: { employeeId: employee.id, year: currentYear },
-      include: { leaveType: true }
+      include: { leaveType: true },
     });
-    
-    const vacationBalance = balances.find(b => b.leaveType?.name.includes('พักร้อน') || b.leaveType?.name.includes('พักผ่อน'));
+
+    const vacationBalance = balances.find(
+      (b) =>
+        b.leaveType?.name.includes('พักร้อน') ||
+        b.leaveType?.name.includes('พักผ่อน'),
+    );
     const remainingVacation = vacationBalance?.remainingDays || 0;
 
     const pendingApprovals = await this.prisma.leaveRequest.count({
       where: {
         employeeId: employee.id,
-        status: { in: ['PENDING_VERIFY', 'REVIEWING_HR', 'PENDING_SUPERVISOR', 'PENDING_EXECUTIVE'] }
-      }
+        status: {
+          in: [
+            'PENDING_VERIFY',
+            'REVIEWING_HR',
+            'PENDING_SUPERVISOR',
+            'PENDING_EXECUTIVE',
+          ],
+        },
+      },
     });
 
     const approvedThisYear = await this.prisma.leaveRequest.count({
@@ -961,16 +1207,16 @@ export class EmployeeService {
         status: { contains: 'Approved' },
         startDate: {
           gte: new Date(`${currentYear}-01-01T00:00:00.000Z`),
-          lt: new Date(`${currentYear + 1}-01-01T00:00:00.000Z`)
-        }
-      }
+          lt: new Date(`${currentYear + 1}-01-01T00:00:00.000Z`),
+        },
+      },
     });
 
     const rejectedRequests = await this.prisma.leaveRequest.count({
       where: {
         employeeId: employee.id,
-        status: { contains: 'Rejected' }
-      }
+        status: { contains: 'Rejected' },
+      },
     });
 
     const approvedLeaves = await this.prisma.leaveRequest.findMany({
@@ -979,45 +1225,58 @@ export class EmployeeService {
         status: { contains: 'Approved' },
         startDate: {
           gte: new Date(`${currentYear}-01-01T00:00:00.000Z`),
-          lt: new Date(`${currentYear + 1}-01-01T00:00:00.000Z`)
-        }
-      }
+          lt: new Date(`${currentYear + 1}-01-01T00:00:00.000Z`),
+        },
+      },
     });
 
-    const monthNames = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
-    const chartData = monthNames.map(name => ({ name, value: 0 }));
+    const monthNames = [
+      'ม.ค.',
+      'ก.พ.',
+      'มี.ค.',
+      'เม.ย.',
+      'พ.ค.',
+      'มิ.ย.',
+      'ก.ค.',
+      'ส.ค.',
+      'ก.ย.',
+      'ต.ค.',
+      'พ.ย.',
+      'ธ.ค.',
+    ];
+    const chartData = monthNames.map((name) => ({ name, value: 0 }));
 
-    approvedLeaves.forEach(leave => {
+    approvedLeaves.forEach((leave) => {
       const monthIndex = new Date(leave.startDate).getMonth();
       chartData[monthIndex].value += leave.totalDays;
     });
 
     const announcements = await this.prisma.announcement.findMany({
       orderBy: { createdAt: 'desc' },
-      take: 5
+      take: 5,
     });
 
     const recentLeaves = await this.prisma.leaveRequest.findMany({
       where: { employeeId: employee.id },
       orderBy: { createdAt: 'desc' },
       take: 3,
-      include: { leaveType: true }
+      include: { leaveType: true },
     });
 
-    const activities = recentLeaves.map(r => {
-      let color = "bg-orange-400";
-      let statusText = "ส่งคำขอแล้ว";
-      if (r.status.includes("Approved")) {
-          color = "bg-emerald-400";
-          statusText = "อนุมัติแล้ว";
-      } else if (r.status.includes("Rejected")) {
-          color = "bg-red-400";
-          statusText = "ถูกปฏิเสธ";
+    const activities = recentLeaves.map((r) => {
+      let color = 'bg-orange-400';
+      let statusText = 'ส่งคำขอแล้ว';
+      if (r.status.includes('Approved')) {
+        color = 'bg-emerald-400';
+        statusText = 'อนุมัติแล้ว';
+      } else if (r.status.includes('Rejected')) {
+        color = 'bg-red-400';
+        statusText = 'ถูกปฏิเสธ';
       }
       return {
         title: `${r.leaveType.name} - ${statusText}`,
         time: r.createdAt.toISOString(),
-        color
+        color,
       };
     });
 
@@ -1029,37 +1288,47 @@ export class EmployeeService {
       chartData,
       announcements,
       activities,
-      employeeName: `${employee.firstName} ${employee.lastName}`
+      employeeName: `${employee.firstName} ${employee.lastName}`,
     };
   }
 
   async getLeaveTypes() {
     return this.prisma.leaveType.findMany({
-      orderBy: { name: 'asc' }
+      orderBy: { name: 'asc' },
     });
   }
 
   private async getEmployeeByUserId(userId: string) {
-    const employee = await this.prisma.employee.findUnique({ 
+    const employee = await this.prisma.employee.findUnique({
       where: { userId },
-      include: { user: { include: { role: true } } }
+      include: { user: { include: { role: true } } },
     });
     if (!employee) throw new NotFoundException('Employee profile not found');
     return employee;
   }
 
-  private calculateWorkingDays(startDate: Date, endDate: Date, holidays: Date[], startFormat: string = 'full', endFormat: string = 'full', includeHolidaysAndWeekends: boolean = false, leaveHours: number = 0): number {
+  private calculateWorkingDays(
+    startDate: Date,
+    endDate: Date,
+    holidays: Date[],
+    startFormat: string = 'full',
+    endFormat: string = 'full',
+    includeHolidaysAndWeekends: boolean = false,
+    leaveHours: number = 0,
+  ): number {
     let count = 0;
     const curDate = new Date(startDate);
     curDate.setHours(0, 0, 0, 0);
     const end = new Date(endDate);
     end.setHours(0, 0, 0, 0);
 
-    const holidayTimes = new Set(holidays.map(h => {
-      const d = new Date(h);
-      d.setHours(0, 0, 0, 0);
-      return d.getTime();
-    }));
+    const holidayTimes = new Set(
+      holidays.map((h) => {
+        const d = new Date(h);
+        d.setHours(0, 0, 0, 0);
+        return d.getTime();
+      }),
+    );
 
     while (curDate <= end) {
       const dayOfWeek = curDate.getDay();
@@ -1074,35 +1343,39 @@ export class EmployeeService {
       }
       curDate.setDate(curDate.getDate() + 1);
     }
-    
+
     if (count > 0) {
       if (startFormat === 'morning' || startFormat === 'afternoon') {
         count -= 0.5;
       } else if (startFormat === 'hourly' && leaveHours > 0) {
-        count -= (1 - (leaveHours / 8));
+        count -= 1 - leaveHours / 8;
       }
-      
-      const isSameDay = startDate.getFullYear() === endDate.getFullYear() && 
-                        startDate.getMonth() === endDate.getMonth() && 
-                        startDate.getDate() === endDate.getDate();
 
-      if (!isSameDay && (endFormat === 'morning' || endFormat === 'afternoon')) {
+      const isSameDay =
+        startDate.getFullYear() === endDate.getFullYear() &&
+        startDate.getMonth() === endDate.getMonth() &&
+        startDate.getDate() === endDate.getDate();
+
+      if (
+        !isSameDay &&
+        (endFormat === 'morning' || endFormat === 'afternoon')
+      ) {
         count -= 0.5;
       } else if (!isSameDay && endFormat === 'hourly' && leaveHours > 0) {
-        count -= (1 - (leaveHours / 8));
+        count -= 1 - leaveHours / 8;
       }
     }
-    
+
     return count;
   }
 
   async getPublicHolidays() {
     const holidays = await this.prisma.publicHoliday.findMany({
-      orderBy: { date: 'asc' }
+      orderBy: { date: 'asc' },
     });
     return {
       success: true,
-      data: holidays
+      data: holidays,
     };
   }
 }

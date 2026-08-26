@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -16,6 +16,8 @@ import { UploadModule } from './modules/upload/upload.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { ExportModule } from './modules/export/export.module';
 import { AnnouncementModule } from './modules/announcement/announcement.module';
+import { AdminModule } from './modules/admin/admin.module';
+import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor';
 
 @Module({
   imports: [
@@ -23,10 +25,12 @@ import { AnnouncementModule } from './modules/announcement/announcement.module';
       isGlobal: true,
       load: [configuration],
     }),
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 1000,
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 100,
+      },
+    ]),
     ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
@@ -38,6 +42,7 @@ import { AnnouncementModule } from './modules/announcement/announcement.module';
     NotificationModule,
     ExportModule,
     AnnouncementModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [
@@ -45,6 +50,10 @@ import { AnnouncementModule } from './modules/announcement/announcement.module';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditLogInterceptor,
     },
   ],
 })

@@ -17,13 +17,22 @@ import * as fs from 'fs';
           cb(null, uploadPath);
         },
         filename: (req, file, cb) => {
-          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-          cb(null, file.fieldname + '-' + uniqueSuffix + extname(file.originalname));
+          const uniqueSuffix =
+            Date.now() + '-' + Math.round(Math.random() * 1e9);
+          cb(
+            null,
+            file.fieldname + '-' + uniqueSuffix + extname(file.originalname),
+          );
         },
       }),
       fileFilter: (req, file, cb) => {
         if (!file.originalname.match(/\.(pdf|doc|docx|png|jpeg|jpg)$/i)) {
-          return cb(new Error('ไม่รองรับประเภทไฟล์นี้ (รองรับเฉพาะ PDF, DOCX, PNG, JPG)'), false);
+          return cb(
+            new Error(
+              'ไม่รองรับประเภทไฟล์นี้ (รองรับเฉพาะ PDF, DOCX, PNG, JPG)',
+            ),
+            false,
+          );
         }
         cb(null, true);
       },

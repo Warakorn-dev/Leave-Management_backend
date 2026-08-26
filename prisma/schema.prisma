@@ -145,28 +145,28 @@ model LeaveBalance {
 }
 
 model LeaveRequest {
-  id            String            @id @default(uuid())
-  requestCode   String?           @unique(map: "LeaveRequest_requestCode_key") @db.VarChar(20)
-  employeeId    String
-  leaveTypeId   String
-  startDate     DateTime
-  endDate       DateTime
-  startFormat   String            @default("full")
-  endFormat     String            @default("full")
-  totalDays     Float
-  paidDays      Float             @default(0)
-  unpaidDays    Float             @default(0)
-  reason        String            @db.Text
-  status        String            @default("Pending")
-  isViewedByHr  Boolean           @default(false)
+  id                  String            @id @default(uuid())
+  requestCode         String?           @unique(map: "LeaveRequest_requestCode_key") @db.VarChar(20)
+  employeeId          String
+  leaveTypeId         String
+  startDate           DateTime
+  endDate             DateTime
+  startFormat         String            @default("full")
+  endFormat           String            @default("full")
+  totalDays           Float
+  paidDays            Float             @default(0)
+  unpaidDays          Float             @default(0)
+  reason              String            @db.Text
+  status              String            @default("Pending")
+  isViewedByHr        Boolean           @default(false)
   currentHrReviewerId String?
   hrReviewStartedAt   DateTime?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-  attachments   LeaveAttachment[]
-  approvals     LeaveApproval[]
-  employee      Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade, map: "LeaveRequest_employeeId_fkey")
-  leaveType     LeaveType         @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade, map: "LeaveRequest_leaveTypeId_fkey")
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  attachments         LeaveAttachment[]
+  approvals           LeaveApproval[]
+  employee            Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade, map: "LeaveRequest_employeeId_fkey")
+  leaveType           LeaveType         @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade, map: "LeaveRequest_leaveTypeId_fkey")
 
   @@index([employeeId], map: "LeaveRequest_employeeId_fkey")
   @@index([leaveTypeId], map: "LeaveRequest_leaveTypeId_fkey")
@@ -245,16 +245,23 @@ model Role {
 }
 
 model User {
-  id            String          @id @default(uuid())
-  email         String          @unique(map: "User_email_key")
-  username      String?         @unique(map: "User_username_key")
-  passwordHash  String
-  refreshToken  String?         @db.Text
-  avatarUrl     String?         @db.LongText
-  roleId        String
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  isActive      Boolean         @default(true)
+  id           String   @id @default(uuid())
+  email        String   @unique(map: "User_email_key")
+  username     String?  @unique(map: "User_username_key")
+  passwordHash String
+  refreshToken String?  @db.Text
+  avatarUrl    String?  @db.LongText
+  roleId       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  isActive     Boolean  @default(true)
+
+  // Security fields
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  lastLoginIp         String?
+
   auditLog      AuditLog[]
   employee      Employee?
   leaveApproval LeaveApproval[]
@@ -263,4 +270,14 @@ model User {
 
   @@index([roleId], map: "User_roleId_fkey")
   @@map("user")
+}
+
+model AdminSetting {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  value       String   @db.Text
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("admin_setting")
 }
