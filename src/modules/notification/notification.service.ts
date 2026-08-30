@@ -26,20 +26,19 @@ export class NotificationService {
   }
 
   async sendEmail(to: string, subject: string, text: string, html?: string) {
-    try {
-      const info = await this.transporter.sendMail({
+    // ทำงานแบบ Fire-and-forget เพื่อไม่ให้ API ค้างเวลารอส่งอีเมล
+    this.transporter
+      .sendMail({
         from: `"Leave Management System" <${this.configService.get<string>('email.user')}>`,
         to,
         subject,
         text,
         html: html || text,
-      });
-      this.logger.log(`Message sent: ${info.messageId}`);
-      return true;
-    } catch (error) {
-      this.logger.error(`Error sending email to ${to}`, error);
-      return false;
-    }
+      })
+      .then((info) => this.logger.log(`Message sent: ${info.messageId}`))
+      .catch((error) => this.logger.error(`Error sending email to ${to}`, error));
+
+    return true;
   }
 
   // Cron Job to send reminder for pending requests
