@@ -26,7 +26,9 @@ export class NotificationController {
       return await this.notificationService.getNotifications(user.id);
     } catch (e) {
       console.error('NOTIFICATION API ERROR:', e);
-      throw new (require('@nestjs/common').InternalServerErrorException)(e instanceof Error ? e.message : 'Unknown error');
+      throw new (require('@nestjs/common').InternalServerErrorException)(
+        e instanceof Error ? e.message : 'Unknown error',
+      );
     }
   }
 

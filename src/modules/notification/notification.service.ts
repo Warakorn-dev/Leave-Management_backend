@@ -36,7 +36,9 @@ export class NotificationService {
         html: html || text,
       })
       .then((info) => this.logger.log(`Message sent: ${info.messageId}`))
-      .catch((error) => this.logger.error(`Error sending email to ${to}`, error));
+      .catch((error) =>
+        this.logger.error(`Error sending email to ${to}`, error),
+      );
 
     return true;
   }

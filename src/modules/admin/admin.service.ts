@@ -111,6 +111,29 @@ export class AdminService {
     };
   }
 
+  async getAllUsers() {
+    return this.prisma.user.findMany({
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        isActive: true,
+        lastLoginAt: true,
+        createdAt: true,
+        role: { select: { name: true } },
+        employee: {
+          select: {
+            firstName: true,
+            lastName: true,
+            department: { select: { name: true } },
+            position: { select: { name: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
   async forceLogout(userId: string) {
     await this.prisma.user.update({
       where: { id: userId },

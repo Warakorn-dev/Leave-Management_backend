@@ -59,6 +59,25 @@ export class EmployeeController {
     return this.employeeService.getPublicHolidays();
   }
 
+  @Get('day-availability')
+  @ApiOperation({
+    summary:
+      'Per-day leave availability (which half is booked / free) for the current employee',
+  })
+  getDayAvailability(
+    @CurrentUser() user: any,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+    @Query('excludeRequestId') excludeRequestId?: string,
+  ) {
+    return this.employeeService.getDayAvailability(
+      user.id,
+      startDate,
+      endDate,
+      excludeRequestId,
+    );
+  }
+
   @Get('history')
   @ApiOperation({ summary: 'Get leave history' })
   getLeaveHistory(@CurrentUser() user: any) {

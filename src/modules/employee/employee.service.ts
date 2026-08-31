@@ -10,6 +10,16 @@ import {
   UpdateLeaveRequestDto,
 } from './dto/employee.dto';
 import { NotificationService } from '../notification/notification.service';
+import {
+  planDayPortions,
+  formatConflictMessage,
+  buildOccupiedHalves,
+  toDayKey,
+  BLOCKING_EXCLUDED_STATUSES,
+  LeavePortionInput,
+  DayHalf,
+  DayPortionPlanEntry,
+} from './leave-portion.util';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -20,57 +30,58 @@ export class EmployeeService {
     private notificationService: NotificationService,
   ) {}
 
-  private checkLeaveOverlap(
-    newReq: {
+  /**
+   * Portion-aware planner. Compares the requested leave against the
+   * employee's other active leaves per calendar day and per half-day slot, so
+   * a morning + an afternoon leave can co-exist on the same day. A day only
+   * blocks the whole request when NONE of its requested halves are free —
+   * a day that is only partially free (e.g. a full-day request landing on a
+   * day whose morning is already taken) degrades to a half-day claim on that
+   * one day instead of rejecting the entire range. Throws only for the
+   * genuinely-blocked case; otherwise returns the per-day plan to persist.
+   */
+  private planPortionsOrThrow(
+    requested: LeavePortionInput,
+    existingLeaves: LeavePortionInput[],
+    holidays: (Date | string)[],
+    includeWeekendsAndHolidays: boolean,
+  ): { days: DayPortionPlanEntry[]; totalDays: number } {
+    const plan = planDayPortions(
+      requested,
+      existingLeaves,
+      holidays,
+      includeWeekendsAndHolidays,
+    );
+    if (!plan.ok) {
+      throw new BadRequestException(formatConflictMessage(plan.conflicts));
+    }
+    return plan;
+  }
+
+  /** Map Prisma leave rows (optionally with their `days` breakdown) to the
+   *  plain shape the portion-planning helpers work with. */
+  private toPortionInputs(
+    rows: {
       startDate: Date;
       endDate: Date;
-      startFormat: string;
-      endFormat: string;
-      leaveMode?: string;
-    },
-    existingReq: {
-      startDate: Date;
-      endDate: Date;
-      startFormat: string;
-      endFormat: string;
-      leaveMode?: string;
-    },
-  ): boolean {
-    const getRange = (req: any) => {
-      let start = new Date(req.startDate).getTime();
-      let end = new Date(req.endDate).getTime();
-
-      const isHourly =
-        req.startFormat === 'hourly' || req.leaveMode === 'hourly';
-
-      if (!isHourly) {
-        const dStart = new Date(start);
-        dStart.setHours(0, 0, 0, 0);
-        start = dStart.getTime();
-
-        const dEnd = new Date(end);
-        dEnd.setHours(23, 59, 59, 999);
-        end = dEnd.getTime();
-
-        // Single day half-day adjustment
-        const dStartOnlyDate = new Date(dStart).setHours(0, 0, 0, 0);
-        const dEndOnlyDate = new Date(dEnd).setHours(0, 0, 0, 0);
-
-        if (dStartOnlyDate === dEndOnlyDate) {
-          if (req.startFormat === 'morning') {
-            end = new Date(dStart).setHours(12, 0, 0, 0);
-          } else if (req.startFormat === 'afternoon') {
-            start = new Date(dStart).setHours(12, 0, 0, 0);
-          }
-        }
-      }
-      return { start, end };
-    };
-
-    const r1 = getRange(newReq);
-    const r2 = getRange(existingReq);
-
-    return r1.start < r2.end && r1.end > r2.start;
+      startFormat?: string | null;
+      endFormat?: string | null;
+      days?: { date: Date; portion: string }[];
+    }[],
+  ): LeavePortionInput[] {
+    return rows.map((r) => ({
+      startDate: r.startDate,
+      endDate: r.endDate,
+      startFormat: r.startFormat,
+      endFormat: r.endFormat,
+      days: r.days?.map((d) => ({
+        date: d.date,
+        portion:
+          d.portion === 'morning' || d.portion === 'afternoon'
+            ? d.portion
+            : 'full',
+      })),
+    }));
   }
 
   async createLeaveRequest(userId: string, dto: CreateLeaveRequestDto) {
@@ -213,15 +224,47 @@ export class EmployeeService {
     const leaveTypeName = balance.leaveType.name;
     const isMaternityFemale =
       leaveTypeName.includes('คลอดบุตร') && employee.gender === 'Female';
-    const calculatedDays = this.calculateWorkingDays(
+
+    // --- OVERLAP-AWARE DAY PLANNING (per day, per half-day slot) ---
+    // A full-day request landing on a day that is already half-booked by
+    // another leave degrades to a half-day claim on that one day, instead of
+    // rejecting the whole range; only a day with genuinely nothing free
+    // blocks the request. See `planDayPortions`.
+    const requestedPortion: LeavePortionInput = {
       startDate,
       endDate,
+      startFormat: dto.startFormat || 'full',
+      endFormat: dto.endFormat || 'full',
+      leaveMode: dto.leaveMode,
+    };
+    const existingRequests = await this.prisma.leaveRequest.findMany({
+      where: {
+        employeeId: employee.id,
+        status: { notIn: BLOCKING_EXCLUDED_STATUSES },
+      },
+      include: { days: true },
+    });
+    const plan = this.planPortionsOrThrow(
+      requestedPortion,
+      this.toPortionInputs(existingRequests),
       holidays.map((h) => h.date),
-      dto.startFormat,
-      dto.endFormat,
       isMaternityFemale,
-      dto.leaveHours,
     );
+    // Hourly leaves are sized by the exact clock duration (leaveHours), not
+    // by which half of the day they touch.
+    const calculatedDays =
+      dto.leaveMode === 'hourly'
+        ? this.calculateWorkingDays(
+            startDate,
+            endDate,
+            holidays.map((h) => h.date),
+            dto.startFormat,
+            dto.endFormat,
+            isMaternityFemale,
+            dto.leaveHours,
+          )
+        : plan.totalDays;
+    // -------------------------
 
     if (calculatedDays <= 0) {
       throw new BadRequestException(
@@ -234,39 +277,6 @@ export class EmployeeService {
         `สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`,
       );
     }
-
-    // --- OVERLAP VALIDATION ---
-    const existingRequests = await this.prisma.leaveRequest.findMany({
-      where: {
-        employeeId: employee.id,
-        status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
-      },
-    });
-
-    for (const req of existingRequests) {
-      if (
-        this.checkLeaveOverlap(
-          {
-            startDate,
-            endDate,
-            startFormat: dto.startFormat || 'full',
-            endFormat: dto.endFormat || 'full',
-            leaveMode: dto.leaveMode,
-          },
-          {
-            startDate: req.startDate,
-            endDate: req.endDate,
-            startFormat: req.startFormat,
-            endFormat: req.endFormat,
-          },
-        )
-      ) {
-        throw new BadRequestException(
-          'คุณมีการลางานในช่วงวันที่/เวลานี้อยู่แล้ว ไม่สามารถยื่นคำขอลาซ้ำซ้อนได้',
-        );
-      }
-    }
-    // -------------------------
 
     let paidDays = calculatedDays;
     let unpaidDays = 0;
@@ -388,22 +398,52 @@ export class EmployeeService {
     //       PENDING_VERIFY → (HR) → PENDING_SUPERVISOR → (Manager) → PENDING_EXECUTIVE → (CEO) → APPROVED (ลาพิเศษ)
     const initialStatus = 'PENDING_VERIFY';
 
-    // Create Leave Request
-    const leaveRequest = await this.prisma.leaveRequest.create({
-      data: {
-        requestCode,
-        employeeId: employee.id,
-        leaveTypeId: dto.leaveTypeId,
-        startDate: startDate,
-        endDate: endDate,
-        startFormat: dto.startFormat || 'full',
-        endFormat: dto.endFormat || 'full',
-        totalDays: calculatedDays,
-        paidDays: paidDays,
-        unpaidDays: unpaidDays,
-        reason: dto.reason,
-        status: initialStatus,
-      },
+    // Create Leave Request.
+    // Serialize concurrent leave creation for the same employee with a row lock
+    // on their existing leaves, then re-run the portion conflict check inside the
+    // transaction so two requests submitted at the same time cannot both claim
+    // the same half-day slot (race condition guard).
+    const leaveRequest = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM leaverequest WHERE employeeId = ${employee.id} FOR UPDATE`;
+      const freshExisting = await tx.leaveRequest.findMany({
+        where: {
+          employeeId: employee.id,
+          status: { notIn: BLOCKING_EXCLUDED_STATUSES },
+        },
+        include: { days: true },
+      });
+      // Re-plan inside the row-locked transaction so two requests submitted
+      // at the same time cannot both claim the same half-day slot; also
+      // gives us the exact day/portion breakdown to persist.
+      const freshPlan = this.planPortionsOrThrow(
+        requestedPortion,
+        this.toPortionInputs(freshExisting),
+        holidays.map((h) => h.date),
+        isMaternityFemale,
+      );
+
+      return tx.leaveRequest.create({
+        data: {
+          requestCode,
+          employeeId: employee.id,
+          leaveTypeId: dto.leaveTypeId,
+          startDate: startDate,
+          endDate: endDate,
+          startFormat: dto.startFormat || 'full',
+          endFormat: dto.endFormat || 'full',
+          totalDays: calculatedDays,
+          paidDays: paidDays,
+          unpaidDays: unpaidDays,
+          reason: dto.reason,
+          status: initialStatus,
+          days: {
+            create: freshPlan.days.map((d) => ({
+              date: new Date(`${d.date}T00:00:00.000Z`),
+              portion: d.portion,
+            })),
+          },
+        },
+      });
     });
 
     // Notify Approver(s)
@@ -700,55 +740,54 @@ export class EmployeeService {
       const leaveTypeName = balance.leaveType.name;
       const isMaternityFemale =
         leaveTypeName.includes('คลอดบุตร') && employee.gender === 'Female';
+      const isHourly =
+        dto.leaveMode === 'hourly' ||
+        (!dto.leaveMode && request.startFormat === 'hourly');
 
-      const calculatedDays = this.calculateWorkingDays(
-        newStartDate,
-        newEndDate,
+      // --- OVERLAP-AWARE DAY PLANNING (per day, per half-day slot) ---
+      // The row being edited is excluded so it never clashes with itself; a
+      // full-day request landing on a day already half-booked elsewhere
+      // degrades to a half-day claim on that one day instead of rejecting
+      // the whole range. See `planDayPortions`.
+      const editedPortion: LeavePortionInput = {
+        startDate: newStartDate,
+        endDate: newEndDate,
+        startFormat: dto.startFormat || request.startFormat || 'full',
+        endFormat: dto.endFormat || request.endFormat || 'full',
+        leaveMode: dto.leaveMode,
+      };
+      const existingRequests = await this.prisma.leaveRequest.findMany({
+        where: {
+          employeeId: employee.id,
+          id: { not: requestId },
+          status: { notIn: BLOCKING_EXCLUDED_STATUSES },
+        },
+        include: { days: true },
+      });
+      const plan = this.planPortionsOrThrow(
+        editedPortion,
+        this.toPortionInputs(existingRequests),
         holidays.map((h) => h.date),
-        dto.startFormat || request.startFormat,
-        dto.endFormat || request.endFormat,
         isMaternityFemale,
-        dto.leaveHours,
       );
+      const calculatedDays = isHourly
+        ? this.calculateWorkingDays(
+            newStartDate,
+            newEndDate,
+            holidays.map((h) => h.date),
+            dto.startFormat || request.startFormat,
+            dto.endFormat || request.endFormat,
+            isMaternityFemale,
+            dto.leaveHours,
+          )
+        : plan.totalDays;
+      // -------------------------
+
       if (calculatedDays <= 0) {
         throw new BadRequestException(
           'จำนวนวันลาเป็น 0 (อาจตรงกับวันหยุดหรือเสาร์-อาทิตย์) กรุณาเลือกวันใหม่อีกครั้ง',
         );
       }
-
-      // --- OVERLAP VALIDATION ---
-      const existingRequests = await this.prisma.leaveRequest.findMany({
-        where: {
-          employeeId: employee.id,
-          id: { not: requestId },
-          status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
-        },
-      });
-
-      for (const req of existingRequests) {
-        if (
-          this.checkLeaveOverlap(
-            {
-              startDate: newStartDate,
-              endDate: newEndDate,
-              startFormat: dto.startFormat || request.startFormat || 'full',
-              endFormat: dto.endFormat || request.endFormat || 'full',
-              leaveMode: dto.leaveMode,
-            },
-            {
-              startDate: req.startDate,
-              endDate: req.endDate,
-              startFormat: req.startFormat,
-              endFormat: req.endFormat,
-            },
-          )
-        ) {
-          throw new BadRequestException(
-            'คุณมีการลางานในช่วงวันที่/เวลานี้อยู่แล้ว ไม่สามารถแก้ไขคำขอลาให้ซ้ำซ้อนได้',
-          );
-        }
-      }
-      // -------------------------
 
       const pendingLeave = await this.prisma.leaveRequest.aggregate({
         where: {
@@ -867,6 +906,14 @@ export class EmployeeService {
       dataToUpdate.endDate = newEndDate;
       dataToUpdate.startFormat = dto.startFormat || request.startFormat;
       dataToUpdate.endFormat = dto.endFormat || request.endFormat;
+      // Replace the per-day breakdown with the freshly planned one.
+      dataToUpdate.days = {
+        deleteMany: {},
+        create: plan.days.map((d) => ({
+          date: new Date(`${d.date}T00:00:00.000Z`),
+          portion: d.portion,
+        })),
+      };
     }
 
     delete dataToUpdate.leaveMode;
@@ -1377,5 +1424,118 @@ export class EmployeeService {
       success: true,
       data: holidays,
     };
+  }
+
+  /**
+   * Per-day leave availability for the current employee across [startDate,
+   * endDate]. Used by the request / edit screens to show, for every day, which
+   * half is already booked and which half is still free — instead of blindly
+   * blocking a whole day. `excludeRequestId` drops the row being edited so it
+   * does not count against itself.
+   */
+  async getDayAvailability(
+    userId: string,
+    startDateStr: string,
+    endDateStr: string,
+    excludeRequestId?: string,
+  ) {
+    const employee = await this.getEmployeeByUserId(userId);
+
+    const start = new Date(startDateStr);
+    const end = new Date(endDateStr);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      throw new BadRequestException('ช่วงวันที่ไม่ถูกต้อง');
+    }
+    if (start > end) {
+      throw new BadRequestException('วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด');
+    }
+
+    const rangeStart = new Date(
+      Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()),
+    );
+    const rangeEnd = new Date(
+      Date.UTC(
+        end.getUTCFullYear(),
+        end.getUTCMonth(),
+        end.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
+
+    const spanDays =
+      Math.round(
+        (rangeEnd.getTime() - rangeStart.getTime()) / (1000 * 60 * 60 * 24),
+      ) + 1;
+    if (spanDays > 366) {
+      throw new BadRequestException('ช่วงวันที่กว้างเกินไป');
+    }
+
+    const [existing, holidays] = await Promise.all([
+      this.prisma.leaveRequest.findMany({
+        where: {
+          employeeId: employee.id,
+          status: { notIn: BLOCKING_EXCLUDED_STATUSES },
+          startDate: { lte: rangeEnd },
+          endDate: { gte: rangeStart },
+          ...(excludeRequestId ? { id: { not: excludeRequestId } } : {}),
+        },
+        select: {
+          startDate: true,
+          endDate: true,
+          startFormat: true,
+          endFormat: true,
+          days: { select: { date: true, portion: true } },
+          leaveType: { select: { name: true } },
+        },
+      }),
+      this.prisma.publicHoliday.findMany({
+        where: { date: { gte: rangeStart, lte: rangeEnd } },
+      }),
+    ]);
+
+    const occupied = buildOccupiedHalves(this.toPortionInputs(existing));
+    const holidaySet = new Set(holidays.map((h) => toDayKey(h.date)));
+
+    const days: Array<{
+      date: string;
+      isWeekend: boolean;
+      isHoliday: boolean;
+      takenHalves: DayHalf[];
+      morningTaken: boolean;
+      afternoonTaken: boolean;
+      status: 'available' | 'partial' | 'full' | 'holiday';
+    }> = [];
+
+    const cursor = new Date(rangeStart);
+    while (cursor <= rangeEnd) {
+      const key = toDayKey(cursor);
+      const weekday = cursor.getUTCDay();
+      const isWeekend = weekday === 0 || weekday === 6;
+      const isHoliday = holidaySet.has(key);
+      const taken = occupied.get(key) ?? new Set<DayHalf>();
+      const morningTaken = taken.has('morning');
+      const afternoonTaken = taken.has('afternoon');
+
+      let status: 'available' | 'partial' | 'full' | 'holiday' = 'available';
+      if (isWeekend || isHoliday) status = 'holiday';
+      else if (morningTaken && afternoonTaken) status = 'full';
+      else if (morningTaken || afternoonTaken) status = 'partial';
+
+      days.push({
+        date: key,
+        isWeekend,
+        isHoliday,
+        takenHalves: [...taken].sort(),
+        morningTaken,
+        afternoonTaken,
+        status,
+      });
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return { success: true, data: days };
   }
 }

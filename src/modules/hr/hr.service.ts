@@ -946,12 +946,17 @@ export class HrService {
     });
   }
   // --- Leave Verification (HR) ---
-  async getPendingVerify() {
+  async getPendingVerify(hrUserId: string) {
+    const hrEmployee = await this.prisma.employee.findUnique({
+      where: { userId: hrUserId },
+    });
+
     const requests = await this.prisma.leaveRequest.findMany({
       where: {
         status: {
           in: ['PENDING_VERIFY', 'REVIEWING_HR', 'PENDING_CANCELLATION'],
         },
+        ...(hrEmployee ? { employeeId: { not: hrEmployee.id } } : {}),
       },
       orderBy: { createdAt: 'desc' },
       include: {
@@ -1014,10 +1019,16 @@ export class HrService {
   ) {
     const request = await this.prisma.leaveRequest.findUnique({
       where: { id: requestId },
+      include: { employee: true },
     });
     if (!request) {
       throw new BadRequestException('Request not found');
     }
+
+    if (request.employee.userId === hrUserId) {
+      throw new BadRequestException('คุณไม่สามารถตรวจสอบคำขอลาของตนเองได้');
+    }
+
     if (request.status === 'PENDING_CANCELLATION') {
       return this.prisma.leaveRequest.update({
         where: { id: requestId },
@@ -1104,6 +1115,10 @@ export class HrService {
       )
     ) {
       throw new BadRequestException('Invalid request or already verified');
+    }
+
+    if (request.employee.userId === hrUserId) {
+      throw new BadRequestException('คุณไม่สามารถตรวจสอบคำขอลาของตนเองได้');
     }
 
     if (
@@ -1235,9 +1250,9 @@ export class HrService {
     } else {
       const roleName = request.employee.user?.role?.name || '';
       const posName = (request.employee as any).position?.name || '';
-      const isLeaderOrManager = 
-        ['Manager', 'CEO'].includes(roleName) || 
-        posName.toLowerCase().includes('leader') || 
+      const isLeaderOrManager =
+        ['Manager', 'CEO'].includes(roleName) ||
+        posName.toLowerCase().includes('leader') ||
         posName.toLowerCase().includes('manager') ||
         roleName.toLowerCase().includes('leader');
       const isManagerOrCEO = isLeaderOrManager;

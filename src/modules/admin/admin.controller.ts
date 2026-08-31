@@ -42,6 +42,12 @@ export class AdminController {
     return this.adminService.getUsers(query);
   }
 
+  @Get('users/all')
+  @ApiOperation({ summary: 'Get every user (read-only list, no pagination)' })
+  getAllUsers() {
+    return this.adminService.getAllUsers();
+  }
+
   @Patch('users/:id/force-logout')
   @ApiOperation({ summary: 'Force a user to logout (revoke refresh token)' })
   forceLogout(@Param('id') id: string) {

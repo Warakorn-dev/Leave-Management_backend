@@ -212,8 +212,8 @@ export class HrController {
 
   @Get('leaves/pending-verify')
   @ApiOperation({ summary: 'Get all pending verify leave requests' })
-  getPendingVerify() {
-    return this.hrService.getPendingVerify();
+  getPendingVerify(@Request() req: any) {
+    return this.hrService.getPendingVerify(req.user.id);
   }
 
   @Put('leaves/:id/verify')
