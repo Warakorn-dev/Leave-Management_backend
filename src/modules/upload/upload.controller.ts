@@ -5,6 +5,7 @@ import {
   UploadedFile,
   UseGuards,
   BadRequestException,
+  ForbiddenException,
   Body,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -48,6 +49,7 @@ export class UploadController {
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Body('leaveRequestId') leaveRequestId: string,
+    @CurrentUser() user: any,
   ) {
     if (!file) {
       throw new BadRequestException('กรุณาเลือกไฟล์ก่อนอัปโหลด');
@@ -59,6 +61,7 @@ export class UploadController {
     // Verify leave request exists
     const leaveRequest = await this.prisma.leaveRequest.findUnique({
       where: { id: leaveRequestId },
+      include: { employee: { include: { user: true } } },
     });
     if (!leaveRequest) {
       // Clean up uploaded temp file
@@ -70,6 +73,18 @@ export class UploadController {
         }
       }
       throw new BadRequestException('ไม่พบคำขอลาที่ต้องการแนบไฟล์');
+    }
+
+    if (leaveRequest.employee.userId !== user.id) {
+      // Clean up uploaded temp file
+      if (file.path && fs.existsSync(file.path)) {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (error) {
+          console.warn('Failed to delete temp file:', error);
+        }
+      }
+      throw new ForbiddenException('ไม่มีสิทธิ์แนบไฟล์ในคำขอลานี้');
     }
 
     try {

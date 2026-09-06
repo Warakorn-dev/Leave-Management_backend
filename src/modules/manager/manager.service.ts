@@ -319,8 +319,11 @@ export class ManagerService {
         }),
         this.prisma.leaveRequest.count({
           where: {
-            status: 'Pending',
-            employee: { departmentId: manager.departmentId },
+            status: 'PENDING_SUPERVISOR',
+            employee: {
+              departmentId: manager.departmentId,
+              id: { not: manager.id },
+            },
           },
         }),
         this.prisma.announcement.findMany({
