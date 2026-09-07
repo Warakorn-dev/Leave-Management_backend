@@ -1,4 +1,12 @@
-import { Controller, Get, Put, Param, Body, UseGuards, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Put,
+  Param,
+  Body,
+  UseGuards,
+  Query,
+} from '@nestjs/common';
 import { CeoService } from './ceo.service';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -17,7 +25,10 @@ export class CeoController {
   @Get('dashboard')
   @ApiOperation({ summary: 'Get CEO Dashboard statistics' })
   getDashboardStats(@CurrentUser() user: any, @Query('year') year?: string) {
-    return this.ceoService.getDashboardStats(user.id, year ? parseInt(year) : undefined);
+    return this.ceoService.getDashboardStats(
+      user.id,
+      year ? parseInt(year) : undefined,
+    );
   }
 
   @Get('report/company')
@@ -39,7 +50,9 @@ export class CeoController {
   }
 
   @Get('pending')
-  @ApiOperation({ summary: 'Get pending executive leave requests (PENDING_EXECUTIVE)' })
+  @ApiOperation({
+    summary: 'Get pending executive leave requests (PENDING_EXECUTIVE)',
+  })
   getPendingExecutive() {
     return this.ceoService.getPendingExecutive();
   }

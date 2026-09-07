@@ -145,32 +145,54 @@ model LeaveBalance {
 }
 
 model LeaveRequest {
-  id            String            @id @default(uuid())
-  requestCode   String?           @unique(map: "LeaveRequest_requestCode_key") @db.VarChar(20)
-  employeeId    String
-  leaveTypeId   String
-  startDate     DateTime
-  endDate       DateTime
-  startFormat   String            @default("full")
-  endFormat     String            @default("full")
-  totalDays     Float
-  paidDays      Float             @default(0)
-  unpaidDays    Float             @default(0)
-  reason        String            @db.Text
-  status        String            @default("Pending")
-  isViewedByHr  Boolean           @default(false)
+  id                  String            @id @default(uuid())
+  requestCode         String?           @unique(map: "LeaveRequest_requestCode_key") @db.VarChar(20)
+  employeeId          String
+  leaveTypeId         String
+  startDate           DateTime
+  endDate             DateTime
+  startFormat         String            @default("full")
+  endFormat           String            @default("full")
+  totalDays           Float
+  paidDays            Float             @default(0)
+  unpaidDays          Float             @default(0)
+  reason              String            @db.Text
+  status              String            @default("Pending")
+  isViewedByHr        Boolean           @default(false)
   currentHrReviewerId String?
   hrReviewStartedAt   DateTime?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-  attachments   LeaveAttachment[]
-  approvals     LeaveApproval[]
-  employee      Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade, map: "LeaveRequest_employeeId_fkey")
-  leaveType     LeaveType         @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade, map: "LeaveRequest_leaveTypeId_fkey")
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  attachments         LeaveAttachment[]
+  approvals           LeaveApproval[]
+  days                LeaveRequestDay[]
+  employee            Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade, map: "LeaveRequest_employeeId_fkey")
+  leaveType           LeaveType         @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade, map: "LeaveRequest_leaveTypeId_fkey")
 
   @@index([employeeId], map: "LeaveRequest_employeeId_fkey")
   @@index([leaveTypeId], map: "LeaveRequest_leaveTypeId_fkey")
   @@map("leaverequest")
+}
+
+// Per-day breakdown of a LeaveRequest's start/end range. A calendar day can
+// only hold one full day of leave (portion = "full") or one half
+// ("morning" / "afternoon"). Needed because a multi-day request whose
+// *middle* day was already half-booked by another leave degrades to a
+// half-day claim on that one day (e.g. a 3-day full-day request where the
+// middle day only had its afternoon free totals 2.5 days) — something
+// startFormat/endFormat alone (boundary days only) cannot express.
+// Weekends/holidays are never rows here. See planDayPortions in
+// leave-portion.util.ts.
+model LeaveRequestDay {
+  id             String       @id @default(uuid())
+  leaveRequestId String
+  date           DateTime
+  portion        String
+  leaveRequest   LeaveRequest @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade, map: "LeaveRequestDay_leaveRequestId_fkey")
+
+  @@unique([leaveRequestId, date], map: "LeaveRequestDay_leaveRequestId_date_key")
+  @@index([leaveRequestId], map: "LeaveRequestDay_leaveRequestId_fkey")
+  @@map("leaverequestday")
 }
 
 model LeaveType {
@@ -245,16 +267,23 @@ model Role {
 }
 
 model User {
-  id            String          @id @default(uuid())
-  email         String          @unique(map: "User_email_key")
-  username      String?         @unique(map: "User_username_key")
-  passwordHash  String
-  refreshToken  String?         @db.Text
-  avatarUrl     String?         @db.LongText
-  roleId        String
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  isActive      Boolean         @default(true)
+  id           String   @id @default(uuid())
+  email        String   @unique(map: "User_email_key")
+  username     String?  @unique(map: "User_username_key")
+  passwordHash String
+  refreshToken String?  @db.Text
+  avatarUrl    String?  @db.LongText
+  roleId       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  isActive     Boolean  @default(true)
+
+  // Security fields
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  lastLoginIp         String?
+
   auditLog      AuditLog[]
   employee      Employee?
   leaveApproval LeaveApproval[]
@@ -263,4 +292,14 @@ model User {
 
   @@index([roleId], map: "User_roleId_fkey")
   @@map("user")
+}
+
+model AdminSetting {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  value       String   @db.Text
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("admin_setting")
 }

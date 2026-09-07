@@ -1,10 +1,29 @@
-import { Controller, Get, Post, Put, Body, UseGuards, HttpCode, HttpStatus, Headers, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Body,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  Headers,
+  Query,
+  Req,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { LoginDto, ForgotPasswordDto, ResetPasswordDto, UpdateProfileDto, VerifyCaptchaDto } from './dto/auth.dto';
+import {
+  LoginDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+  UpdateProfileDto,
+  VerifyCaptchaDto,
+} from './dto/auth.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { AuthGuard } from '@nestjs/passport';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -33,10 +52,15 @@ export class AuthController {
   }
 
   @Post('login')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login to get JWT tokens' })
-  login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+  login(@Body() loginDto: LoginDto, @Req() req: any) {
+    const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+    return this.authService.login(
+      loginDto,
+      typeof ip === 'string' ? ip : ip[0],
+    );
   }
 
   @Post('logout')
@@ -58,9 +82,14 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request password reset email' })
-  forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto, @Headers('origin') origin: string, @Headers('referer') referer: string) {
+  forgotPassword(
+    @Body() forgotPasswordDto: ForgotPasswordDto,
+    @Headers('origin') origin: string,
+    @Headers('referer') referer: string,
+  ) {
     let baseUrl = origin || 'http://localhost:3000';
     if (!origin && referer) {
       const url = new URL(referer);

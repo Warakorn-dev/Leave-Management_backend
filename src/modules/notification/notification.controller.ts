@@ -1,4 +1,12 @@
-import { Controller, Get, Patch, Post, Param, UseGuards, Request } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Param,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
 import { NotificationService } from './notification.service';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -17,8 +25,10 @@ export class NotificationController {
     try {
       return await this.notificationService.getNotifications(user.id);
     } catch (e) {
-      console.error("NOTIFICATION API ERROR:", e);
-      throw e;
+      console.error('NOTIFICATION API ERROR:', e);
+      throw new (require('@nestjs/common').InternalServerErrorException)(
+        e instanceof Error ? e.message : 'Unknown error',
+      );
     }
   }
 

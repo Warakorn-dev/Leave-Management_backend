@@ -25,7 +25,7 @@ export class ExportService {
       { header: 'Status', key: 'status', width: 15 },
     ];
 
-    leaves.forEach(leave => {
+    leaves.forEach((leave) => {
       worksheet.addRow({
         id: leave.id,
         employeeName: `${leave.employee.firstName} ${leave.employee.lastName}`,
@@ -36,8 +36,14 @@ export class ExportService {
       });
     });
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename=leave_report.xlsx');
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=leave_report.xlsx',
+    );
 
     return workbook.xlsx.write(res).then(() => {
       res.status(200).end();
@@ -51,15 +57,24 @@ export class ExportService {
 
     const doc = new PDFDocument();
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename=leave_report.pdf');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=leave_report.pdf',
+    );
 
     doc.pipe(res);
     doc.fontSize(20).text('Leave Management Report', { align: 'center' });
     doc.moveDown();
 
     leaves.forEach((leave, i) => {
-      doc.fontSize(12).text(`${i + 1}. ${leave.employee.firstName} ${leave.employee.lastName} - ${leave.leaveType.name}`);
-      doc.text(`   Dates: ${leave.startDate.toISOString().split('T')[0]} to ${leave.endDate.toISOString().split('T')[0]}`);
+      doc
+        .fontSize(12)
+        .text(
+          `${i + 1}. ${leave.employee.firstName} ${leave.employee.lastName} - ${leave.leaveType.name}`,
+        );
+      doc.text(
+        `   Dates: ${leave.startDate.toISOString().split('T')[0]} to ${leave.endDate.toISOString().split('T')[0]}`,
+      );
       doc.text(`   Status: ${leave.status}`);
       doc.moveDown();
     });
