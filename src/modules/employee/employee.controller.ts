@@ -1,6 +1,20 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, UseGuards, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  UseGuards,
+  Query,
+} from '@nestjs/common';
 import { EmployeeService } from './employee.service';
-import { CreateLeaveRequestDto, UpdateLeaveRequestDto } from './dto/employee.dto';
+import {
+  CreateLeaveRequestDto,
+  UpdateLeaveRequestDto,
+} from './dto/employee.dto';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -10,21 +24,27 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 @ApiTags('Employee Leave Module')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('Employee', 'Manager', 'HR', 'CEO', 'User') // All can be employees
+@Roles('Employee', 'Manager', 'HR', 'CEO') // Only actual employee roles
 @Controller('leave')
 export class EmployeeController {
   constructor(private readonly employeeService: EmployeeService) {}
 
   @Post()
   @ApiOperation({ summary: 'Submit a new leave request' })
-  createLeaveRequest(@CurrentUser() user: any, @Body() dto: CreateLeaveRequestDto) {
+  createLeaveRequest(
+    @CurrentUser() user: any,
+    @Body() dto: CreateLeaveRequestDto,
+  ) {
     return this.employeeService.createLeaveRequest(user.id, dto);
   }
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Get employee dashboard statistics' })
   getDashboardStats(@CurrentUser() user: any, @Query('year') year?: string) {
-    return this.employeeService.getDashboardStats(user.id, year ? parseInt(year) : undefined);
+    return this.employeeService.getDashboardStats(
+      user.id,
+      year ? parseInt(year) : undefined,
+    );
   }
 
   @Get('types')
@@ -37,6 +57,25 @@ export class EmployeeController {
   @ApiOperation({ summary: 'Get public holidays' })
   getPublicHolidays() {
     return this.employeeService.getPublicHolidays();
+  }
+
+  @Get('day-availability')
+  @ApiOperation({
+    summary:
+      'Per-day leave availability (which half is booked / free) for the current employee',
+  })
+  getDayAvailability(
+    @CurrentUser() user: any,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+    @Query('excludeRequestId') excludeRequestId?: string,
+  ) {
+    return this.employeeService.getDayAvailability(
+      user.id,
+      startDate,
+      endDate,
+      excludeRequestId,
+    );
   }
 
   @Get('history')
@@ -86,7 +125,10 @@ export class EmployeeController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Cancel an active leave request; approved future leave requires HR cancellation approval' })
+  @ApiOperation({
+    summary:
+      'Cancel an active leave request; approved future leave requires HR cancellation approval',
+  })
   deleteLeaveRequest(@CurrentUser() user: any, @Param('id') id: string) {
     return this.employeeService.deleteLeaveRequest(user.id, id);
   }

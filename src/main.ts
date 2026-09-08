@@ -8,9 +8,12 @@ import { ResponseInterceptor } from './utils/response.interceptor';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
+import { json, urlencoded } from 'express';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+  });
   const configService = app.get(ConfigService);
   const isProduction = process.env.NODE_ENV === 'production';
   const jwtSecret = configService.get<string>('jwt.secret');
@@ -58,6 +61,10 @@ async function bootstrap() {
   // Global Prefix
   app.setGlobalPrefix('api');
 
+  // Increase payload limit for base64 image uploads
+  app.use(json({ limit: '50mb' }));
+  app.use(urlencoded({ extended: true, limit: '50mb' }));
+
   // Validation
   app.useGlobalPipes(
     new ValidationPipe({
@@ -79,7 +86,10 @@ async function bootstrap() {
     .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api-docs', app, document);
+  // Hide Swagger in Production
+  if (!isProduction) {
+    SwaggerModule.setup('api-docs', app, document);
+  }
 
   // Start Server
   const port = configService.get<number>('port') || 8000;
