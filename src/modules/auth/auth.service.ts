@@ -342,20 +342,38 @@ export class AuthService {
     return { success: true, message: 'Profile updated successfully' };
   }
 
+  async getPublicConfig() {
+    const setting = await this.prisma.adminSetting.findUnique({
+      where: { key: 'IDLE_TIMEOUT_MINUTES' },
+    });
+    return {
+      idleTimeoutMinutes: setting ? parseInt(setting.value, 10) : 60, // default 60 mins
+    };
+  }
+
   private async getTokens(userId: string, email: string, role: string, tokenVersion: number = 0) {
     const jwtPayload = { sub: userId, email, role, tokenVersion };
+
+    // Read JWT_EXPIRATION from DB (Admin Settings UI) if available; fallback to .env
+    const dbJwtSetting = await this.prisma.adminSetting.findUnique({
+      where: { key: 'JWT_EXPIRATION' },
+    });
+    const jwtExpiration =
+      dbJwtSetting?.value ||
+      this.configService.get<string>('jwt.expiration') ||
+      '20m';
+
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(jwtPayload, {
         secret: this.configService.get<string>('jwt.secret') || 'defaultSecret',
-        expiresIn: (this.configService.get<string>('jwt.expiration') ||
-          '15m') as any,
+        expiresIn: jwtExpiration as any,
       }),
       this.jwtService.signAsync(jwtPayload, {
         secret:
           this.configService.get<string>('jwt.refreshSecret') ||
           'defaultRefresh',
         expiresIn: (this.configService.get<string>('jwt.refreshExpiration') ||
-          '7d') as any,
+          '8h') as any,
       }),
     ]);
 

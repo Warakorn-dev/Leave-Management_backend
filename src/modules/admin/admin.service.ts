@@ -222,7 +222,22 @@ export class AdminService {
   }
 
   async getSettings() {
-    return this.prisma.adminSetting.findMany();
+    // Ensure default settings exist in DB
+    const defaults = [
+      { key: 'MAX_FAILED_LOGINS', value: '5' },
+      { key: 'LOCKOUT_DURATION_MINUTES', value: '15' },
+      { key: 'JWT_EXPIRATION', value: '15m' },
+      { key: 'IDLE_TIMEOUT_MINUTES', value: '60' },
+    ];
+    for (const def of defaults) {
+      await this.prisma.adminSetting.upsert({
+        where: { key: def.key },
+        update: {},
+        create: { key: def.key, value: def.value },
+      });
+    }
+    const settings = await this.prisma.adminSetting.findMany();
+    return { data: settings };
   }
 
   async updateSettings(dto: UpdateSettingsDto) {
@@ -233,7 +248,8 @@ export class AdminService {
         create: { key: setting.key, value: setting.value },
       });
     }
-    return { message: 'Settings updated successfully' };
+    const updated = await this.prisma.adminSetting.findMany();
+    return { message: 'Settings updated successfully', data: updated };
   }
 
   async getSystemHealth() {

@@ -38,6 +38,12 @@ export class AuthController {
     return this.authService.updateProfile(user.id, updateDto);
   }
 
+  @Get('config')
+  @ApiOperation({ summary: 'Get public configuration settings' })
+  getConfig() {
+    return this.authService.getPublicConfig();
+  }
+
   @Get('captcha')
   @ApiOperation({ summary: 'Generate SVG Captcha' })
   getCaptcha(@Query('theme') theme?: string) {
