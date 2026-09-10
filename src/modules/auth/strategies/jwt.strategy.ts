@@ -33,6 +33,9 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     if (user.isActive === false) {
       throw new UnauthorizedException('ACCOUNT_SUSPENDED');
     }
+    if (payload.tokenVersion !== user.tokenVersion) {
+      throw new UnauthorizedException('Token is invalid or expired');
+    }
     return { id: user.id, email: user.email, role: user.role.name };
   }
 }

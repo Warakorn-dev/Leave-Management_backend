@@ -205,7 +205,7 @@ export class AuthService {
       },
     });
 
-    const tokens = await this.getTokens(user.id, user.email, user.role.name);
+    const tokens = await this.getTokens(user.id, user.email, user.role.name, user.tokenVersion);
     await this.updateRefreshToken(user.id, tokens.refreshToken);
 
     return {
@@ -227,7 +227,7 @@ export class AuthService {
   async logout(userId: string) {
     await this.prisma.user.update({
       where: { id: userId },
-      data: { refreshToken: null },
+      data: { refreshToken: null, tokenVersion: { increment: 1 } },
     });
     return { message: 'Logged out successfully' };
   }
@@ -254,7 +254,7 @@ export class AuthService {
       throw new UnauthorizedException('Access Denied');
     }
 
-    const tokens = await this.getTokens(user.id, user.email, user.role.name);
+    const tokens = await this.getTokens(user.id, user.email, user.role.name, user.tokenVersion);
     await this.updateRefreshToken(user.id, tokens.refreshToken);
 
     return tokens;
@@ -304,7 +304,7 @@ export class AuthService {
       const hashedPassword = await bcrypt.hash(resetDto.newPassword, 10);
       await this.prisma.user.update({
         where: { id: payload.sub },
-        data: { passwordHash: hashedPassword, refreshToken: null },
+        data: { passwordHash: hashedPassword, refreshToken: null, tokenVersion: { increment: 1 } },
       });
       return { message: 'Password reset successfully' };
     } catch (e) {
@@ -342,8 +342,8 @@ export class AuthService {
     return { success: true, message: 'Profile updated successfully' };
   }
 
-  private async getTokens(userId: string, email: string, role: string) {
-    const jwtPayload = { sub: userId, email, role };
+  private async getTokens(userId: string, email: string, role: string, tokenVersion: number = 0) {
+    const jwtPayload = { sub: userId, email, role, tokenVersion };
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(jwtPayload, {
         secret: this.configService.get<string>('jwt.secret') || 'defaultSecret',

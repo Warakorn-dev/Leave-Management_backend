@@ -86,6 +86,7 @@ export class AdminService {
           lockedUntil: true,
           lastLoginAt: true,
           lastLoginIp: true,
+          refreshToken: true,
           role: { select: { id: true, name: true } },
           employee: {
             select: {
@@ -101,7 +102,7 @@ export class AdminService {
     ]);
 
     return {
-      items: users,
+      items: users.map(({ refreshToken, ...u }) => ({ ...u, isLoggedIn: !!refreshToken })),
       meta: {
         total,
         page,
@@ -137,7 +138,7 @@ export class AdminService {
   async forceLogout(userId: string) {
     await this.prisma.user.update({
       where: { id: userId },
-      data: { refreshToken: null },
+      data: { refreshToken: null, tokenVersion: { increment: 1 } },
     });
     return { message: 'User forced logout successfully' };
   }
@@ -148,7 +149,7 @@ export class AdminService {
       data: {
         isActive: dto.isActive,
         // If deactivating, also logout
-        ...(dto.isActive === false ? { refreshToken: null } : {}),
+        ...(dto.isActive === false ? { refreshToken: null, tokenVersion: { increment: 1 } } : {}),
       },
     });
     return { message: `User ${dto.isActive ? 'activated' : 'deactivated'}` };
@@ -164,6 +165,7 @@ export class AdminService {
       data: {
         passwordHash,
         refreshToken: null,
+        tokenVersion: { increment: 1 },
         failedLoginAttempts: 0,
         lockedUntil: null,
       },
