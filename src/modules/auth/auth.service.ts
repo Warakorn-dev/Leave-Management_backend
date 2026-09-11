@@ -22,7 +22,7 @@ export class AuthService {
     private jwtService: JwtService,
     private configService: ConfigService,
     private notificationService: NotificationService,
-  ) {}
+  ) { }
 
   async generateCaptcha(theme?: string) {
     const isLight = theme === 'gray' || theme === 'light';
@@ -153,50 +153,6 @@ export class AuthService {
       throw new UnauthorizedException('user ของคุณโดนระงับการใช้งานไปแล้ว');
     }
 
-<<<<<<< HEAD
-    // Check if account is locked
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
-      const remainingTime = Math.ceil(
-        (user.lockedUntil.getTime() - Date.now()) / 60000,
-      );
-      throw new UnauthorizedException(
-        `บัญชีถูกล็อคเนื่องจากใส่รหัสผ่านผิดหลายครั้ง กรุณาลองใหม่ในอีก ${remainingTime} นาที`,
-      );
-    }
-
-    const isPasswordValid = await bcrypt.compare(
-      loginDto.password,
-      user.passwordHash,
-    );
-
-    if (!isPasswordValid) {
-      // Increment failed attempts
-      const newAttempts = (user.failedLoginAttempts || 0) + 1;
-      let lockedUntil: Date | null = null;
-
-      // Lock account after 5 failed attempts
-      if (newAttempts >= 5) {
-        lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // Lock for 15 minutes
-      }
-
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: {
-          failedLoginAttempts: newAttempts,
-          lockedUntil,
-        },
-      });
-
-      if (lockedUntil) {
-        throw new UnauthorizedException(
-          'บัญชีถูกล็อคเนื่องจากใส่รหัสผ่านผิดเกิน 5 ครั้ง กรุณาลองใหม่ในอีก 15 นาที',
-        );
-      }
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    // Successful login, reset failed attempts and update last login
-=======
     // 1. ตรวจสอบว่าบัญชีถูกระงับชั่วคราวอยู่หรือไม่
     if (user.lockedUntil) {
       // ถ้ายึดเวลาปัจจุบันแล้วยังไม่พ้นเวลาล็อค
@@ -266,7 +222,6 @@ export class AuthService {
 
 
     // ล็อกอินสำเร็จ -> รีเซ็ตกลับเป็น 0
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
@@ -277,12 +232,8 @@ export class AuthService {
       },
     });
 
-<<<<<<< HEAD
-    const tokens = await this.getTokens(user.id, user.email, user.role.name);
-=======
 
     const tokens = await this.getTokens(user.id, user.email, user.role.name, user.tokenVersion);
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
     await this.updateRefreshToken(user.id, tokens.refreshToken);
 
     return {
@@ -443,23 +394,14 @@ export class AuthService {
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(jwtPayload, {
         secret: this.configService.get<string>('jwt.secret') || 'defaultSecret',
-<<<<<<< HEAD
-        expiresIn: (this.configService.get<string>('jwt.expiration') ||
-          '15m') as any,
-=======
         expiresIn: jwtExpiration as any,
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
       }),
       this.jwtService.signAsync(jwtPayload, {
         secret:
           this.configService.get<string>('jwt.refreshSecret') ||
           'defaultRefresh',
         expiresIn: (this.configService.get<string>('jwt.refreshExpiration') ||
-<<<<<<< HEAD
-          '7d') as any,
-=======
           '8h') as any,
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
       }),
     ]);
 

@@ -22,12 +22,9 @@ Windows Firewall
 
 ## ระบบปฏิบัติการ
 
-<<<<<<< HEAD
-=======
 ```text
 Windows Server 2022 Standard
 หรือ
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
 Windows Server 2025 Standard
 ```
 
@@ -43,13 +40,8 @@ backup_user
 
 ```text
 CPU: 4 vCPU
-<<<<<<< HEAD
-RAM: 16 GB
-Storage: 500 GB SSD ขึ้นไป
-=======
 RAM: 8-16 GB
 Storage: 200 GB SSD ขึ้นไป
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
 ```
 
 หมายเหตุ: ระบบ upload ปัจจุบันเก็บไฟล์แนบเป็น base64 ใน MySQL ดังนั้น Database Server ควรมี storage มากกว่า Frontend และ Backend
@@ -76,13 +68,8 @@ MySQL: 3306
 ## Database
 
 ```text
-<<<<<<< HEAD
-Database Name: leave_management-new
-Application User: leave_management
-=======
 Database Name: leave_management
 Application User: leave_app
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
 Backup User: backup_user
 ```
 

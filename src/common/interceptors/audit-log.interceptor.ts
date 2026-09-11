@@ -4,13 +4,8 @@ import {
   ExecutionContext,
   CallHandler,
 } from '@nestjs/common';
-<<<<<<< HEAD
-import { Observable } from 'rxjs';
-import { tap } from 'rxjs/operators';
-=======
 import { Observable, throwError } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -24,44 +19,13 @@ export class AuditLogInterceptor implements NestInterceptor {
     // Check if user is authenticated
     const user = req.user;
 
-<<<<<<< HEAD
-    // We only log POST, PUT, PATCH, DELETE methods to keep it lightweight, unless explicitly needed
-=======
     // We only log POST, PUT, PATCH, DELETE methods to keep it lightweight
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
     const method = req.method;
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
       const url = req.url;
       const ipAddress = req.ip || req.headers['x-forwarded-for'];
 
       return next.handle().pipe(
-<<<<<<< HEAD
-        tap(() => {
-          // Fire and forget logging
-          let action = method;
-          const entity = url.split('/')[2] || 'System'; // e.g. /api/users => users
-
-          if (url.includes('/login')) action = 'LOGIN';
-          else if (url.includes('/reset-password')) action = 'PASSWORD_RESET';
-
-          this.prisma.auditLog
-            .create({
-              data: {
-                userId: user ? user.id : null,
-                action,
-                entity,
-                details: `URL: ${url}`,
-                ipAddress:
-                  typeof ipAddress === 'string'
-                    ? ipAddress
-                    : JSON.stringify(ipAddress),
-              },
-            })
-            .catch((err) => {
-              console.error('Failed to write audit log:', err);
-            });
-        }),
-=======
         tap((responseData) => {
           this.logAction(req, user, method, url, ipAddress, responseData, false);
         }),
@@ -69,14 +33,11 @@ export class AuditLogInterceptor implements NestInterceptor {
           this.logAction(req, user, method, url, ipAddress, null, true);
           return throwError(() => err);
         })
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
       );
     }
 
     return next.handle();
   }
-<<<<<<< HEAD
-=======
 
   private logAction(req: any, user: any, method: string, url: string, ipAddress: any, responseData: any, isError: boolean) {
     let action = method;
@@ -113,5 +74,4 @@ export class AuditLogInterceptor implements NestInterceptor {
         console.error('Failed to write audit log:', err);
       });
   }
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
 }

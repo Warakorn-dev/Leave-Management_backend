@@ -3,10 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
-<<<<<<< HEAD
-=======
   PayloadTooLargeException,
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
@@ -32,11 +29,7 @@ export class EmployeeService {
   constructor(
     private prisma: PrismaService,
     private notificationService: NotificationService,
-<<<<<<< HEAD
-  ) {}
-=======
   ) { }
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
 
   /**
    * Portion-aware planner. Compares the requested leave against the
@@ -90,11 +83,7 @@ export class EmployeeService {
             : 'full',
       })),
     }));
-<<<<<<< HEAD
-  }
-=======
   };
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
 
   async createLeaveRequest(userId: string, dto: CreateLeaveRequestDto) {
     const employee = await this.getEmployeeByUserId(userId);
@@ -267,16 +256,6 @@ export class EmployeeService {
     const calculatedDays =
       dto.leaveMode === 'hourly'
         ? this.calculateWorkingDays(
-<<<<<<< HEAD
-            startDate,
-            endDate,
-            holidays.map((h) => h.date),
-            dto.startFormat,
-            dto.endFormat,
-            isMaternityFemale,
-            dto.leaveHours,
-          )
-=======
           startDate,
           endDate,
           holidays.map((h) => h.date),
@@ -285,7 +264,6 @@ export class EmployeeService {
           isMaternityFemale,
           dto.leaveHours,
         )
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
         : plan.totalDays;
     // -------------------------
 
@@ -795,16 +773,6 @@ export class EmployeeService {
       );
       const calculatedDays = isHourly
         ? this.calculateWorkingDays(
-<<<<<<< HEAD
-            newStartDate,
-            newEndDate,
-            holidays.map((h) => h.date),
-            dto.startFormat || request.startFormat,
-            dto.endFormat || request.endFormat,
-            isMaternityFemale,
-            dto.leaveHours,
-          )
-=======
           newStartDate,
           newEndDate,
           holidays.map((h) => h.date),
@@ -813,7 +781,6 @@ export class EmployeeService {
           isMaternityFemale,
           dto.leaveHours,
         )
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
         : plan.totalDays;
       // -------------------------
 
@@ -1078,28 +1045,16 @@ export class EmployeeService {
   }
 
   async updateAvatar(userId: string, avatarUrl: string) {
-<<<<<<< HEAD
-=======
     // Base64 is ~33% larger than binary. A 2MB file is roughly 2.8MB in Base64.
     if (avatarUrl && avatarUrl.length > 2.8 * 1024 * 1024) {
       throw new PayloadTooLargeException('ขนาดไฟล์รูปภาพใหญ่เกินขีดจำกัด (สูงสุดไม่เกิน 2MB)');
     }
 
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
     const oldUser = await this.prisma.user.findUnique({
       where: { id: userId },
     });
 
     if (oldUser?.avatarUrl && oldUser.avatarUrl !== avatarUrl) {
-<<<<<<< HEAD
-      try {
-        const relativePath = oldUser.avatarUrl.startsWith('/')
-          ? oldUser.avatarUrl.substring(1)
-          : oldUser.avatarUrl;
-        const filePath = path.join(process.cwd(), relativePath);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-=======
       if (!oldUser.avatarUrl.startsWith('data:') && !oldUser.avatarUrl.startsWith('http')) {
         try {
           const relativePath = oldUser.avatarUrl.startsWith('/')
@@ -1111,22 +1066,10 @@ export class EmployeeService {
           }
         } catch (err) {
           console.error('Failed to delete old avatar:', err);
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
         }
       }
     }
 
-<<<<<<< HEAD
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data: { avatarUrl },
-    });
-    return {
-      success: true,
-      message: 'Avatar updated successfully',
-      avatarUrl: user.avatarUrl,
-    };
-=======
     try {
       const user = await this.prisma.user.update({
         where: { id: userId },
@@ -1144,7 +1087,6 @@ export class EmployeeService {
       }
       throw new BadRequestException('เกิดข้อผิดพลาดในการอัปเดตรูปภาพ กรุณาลองใหม่อีกครั้ง');
     }
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
   }
 
   async getLeaveHistory(userId: string) {

@@ -86,10 +86,7 @@ export class AdminService {
           lockedUntil: true,
           lastLoginAt: true,
           lastLoginIp: true,
-<<<<<<< HEAD
-=======
           refreshToken: true,
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
           role: { select: { id: true, name: true } },
           employee: {
             select: {
@@ -105,11 +102,7 @@ export class AdminService {
     ]);
 
     return {
-<<<<<<< HEAD
-      items: users,
-=======
       items: users.map(({ refreshToken, ...u }) => ({ ...u, isLoggedIn: !!refreshToken })),
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
       meta: {
         total,
         page,
@@ -145,11 +138,7 @@ export class AdminService {
   async forceLogout(userId: string) {
     await this.prisma.user.update({
       where: { id: userId },
-<<<<<<< HEAD
-      data: { refreshToken: null },
-=======
       data: { refreshToken: null, tokenVersion: { increment: 1 } },
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
     });
     return { message: 'User forced logout successfully' };
   }
@@ -159,14 +148,9 @@ export class AdminService {
       where: { id: userId },
       data: {
         isActive: dto.isActive,
-<<<<<<< HEAD
-        // If deactivating, also logout
-        ...(dto.isActive === false ? { refreshToken: null } : {}),
-=======
         ...(dto.isActive ? { lockedUntil: null, failedLoginAttempts: 0 } : {}),
         // If deactivating, also logout
         ...(dto.isActive === false ? { refreshToken: null, tokenVersion: { increment: 1 } } : {}),
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
       },
     });
     return { message: `User ${dto.isActive ? 'activated' : 'deactivated'}` };
@@ -182,10 +166,7 @@ export class AdminService {
       data: {
         passwordHash,
         refreshToken: null,
-<<<<<<< HEAD
-=======
         tokenVersion: { increment: 1 },
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
         failedLoginAttempts: 0,
         lockedUntil: null,
       },
@@ -217,9 +198,6 @@ export class AdminService {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-<<<<<<< HEAD
-        include: { user: { select: { email: true, username: true } } },
-=======
         include: {
           user: {
             select: {
@@ -229,7 +207,6 @@ export class AdminService {
             },
           },
         },
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
       }),
       this.prisma.auditLog.count(),
     ]);
@@ -246,9 +223,6 @@ export class AdminService {
   }
 
   async getSettings() {
-<<<<<<< HEAD
-    return this.prisma.adminSetting.findMany();
-=======
     // Ensure default settings exist in DB
     const defaults = [
       { key: 'MAX_FAILED_LOGINS', value: '5' },
@@ -265,7 +239,6 @@ export class AdminService {
     }
     const settings = await this.prisma.adminSetting.findMany();
     return { data: settings };
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
   }
 
   async updateSettings(dto: UpdateSettingsDto) {
@@ -276,12 +249,8 @@ export class AdminService {
         create: { key: setting.key, value: setting.value },
       });
     }
-<<<<<<< HEAD
-    return { message: 'Settings updated successfully' };
-=======
     const updated = await this.prisma.adminSetting.findMany();
     return { message: 'Settings updated successfully', data: updated };
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
   }
 
   async getSystemHealth() {
@@ -300,9 +269,6 @@ export class AdminService {
   async exportAuditLogs() {
     const logs = await this.prisma.auditLog.findMany({
       orderBy: { createdAt: 'desc' },
-<<<<<<< HEAD
-      include: { user: { select: { email: true, username: true } } },
-=======
       include: {
         user: {
           select: {
@@ -312,7 +278,6 @@ export class AdminService {
           },
         },
       },
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
     });
 
     // Create CSV content
@@ -328,15 +293,11 @@ export class AdminService {
     ];
     const rows = logs.map((log) => [
       log.id,
-<<<<<<< HEAD
-      log.user ? log.user.email || log.user.username : 'System',
-=======
       log.user
         ? (log.user.employee
             ? `${log.user.employee.firstName} ${log.user.employee.lastName}`
             : log.user.username || log.user.email)
         : 'System',
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
       log.action,
       log.entity,
       log.entityId || '-',

@@ -283,10 +283,7 @@ model User {
   lockedUntil         DateTime?
   lastLoginAt         DateTime?
   lastLoginIp         String?
-<<<<<<< HEAD
-=======
   tokenVersion        Int       @default(0)
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
 
   auditLog      AuditLog[]
   employee      Employee?

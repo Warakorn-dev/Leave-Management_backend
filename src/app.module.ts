@@ -24,8 +24,6 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
     ConfigModule.forRoot({
       isGlobal: true,
       load: [configuration],
-      // เปิดใช้งานการอ้างอิงตัวแปรกลางในไฟล์ .env เช่น ${API_BASE_URL}
-      expandVariables: true,
     }),
     ThrottlerModule.forRoot([
       {

@@ -58,11 +58,7 @@ export class AuthController {
   }
 
   @Post('login')
-<<<<<<< HEAD
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
-=======
   @Throttle({ default: { limit: 20, ttl: 60000 } })
->>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login to get JWT tokens' })
   login(@Body() loginDto: LoginDto, @Req() req: any) {
