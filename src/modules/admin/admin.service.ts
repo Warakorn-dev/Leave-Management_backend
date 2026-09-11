@@ -148,6 +148,7 @@ export class AdminService {
       where: { id: userId },
       data: {
         isActive: dto.isActive,
+        ...(dto.isActive ? { lockedUntil: null, failedLoginAttempts: 0 } : {}),
         // If deactivating, also logout
         ...(dto.isActive === false ? { refreshToken: null, tokenVersion: { increment: 1 } } : {}),
       },

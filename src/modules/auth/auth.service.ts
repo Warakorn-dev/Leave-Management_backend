@@ -22,7 +22,7 @@ export class AuthService {
     private jwtService: JwtService,
     private configService: ConfigService,
     private notificationService: NotificationService,
-  ) {}
+  ) { }
 
   async generateCaptcha(theme?: string) {
     const isLight = theme === 'gray' || theme === 'light';
@@ -153,15 +153,27 @@ export class AuthService {
       throw new UnauthorizedException('user ของคุณโดนระงับการใช้งานไปแล้ว');
     }
 
-    // Check if account is locked
-    if (user.lockedUntil && user.lockedUntil > new Date()) {
-      const remainingTime = Math.ceil(
-        (user.lockedUntil.getTime() - Date.now()) / 60000,
-      );
-      throw new UnauthorizedException(
-        `บัญชีถูกล็อคเนื่องจากใส่รหัสผ่านผิดหลายครั้ง กรุณาลองใหม่ในอีก ${remainingTime} นาที`,
-      );
+    // 1. ตรวจสอบว่าบัญชีถูกระงับชั่วคราวอยู่หรือไม่
+    if (user.lockedUntil) {
+      // ถ้ายึดเวลาปัจจุบันแล้วยังไม่พ้นเวลาล็อค
+      if (user.lockedUntil > new Date()) {
+        const remainingTime = Math.ceil(
+          (user.lockedUntil.getTime() - Date.now()) / 60000,
+        );
+        throw new UnauthorizedException(
+          `บัญชีถูกระงับชั่วคราวเนื่องจากใส่รหัสผ่านผิดเกินกำหนด กรุณาลองใหม่ในอีก ${remainingTime} นาที`,
+        );
+      } else {
+        // กรณีที่เลย 15 นาทีมาแล้ว (พ้นโทษแบน) ให้รีเซ็ตจำนวนครั้งกลับเป็น 0
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { failedLoginAttempts: 0, lockedUntil: null },
+        });
+        user.failedLoginAttempts = 0;
+        user.lockedUntil = null;
+      }
     }
+
 
     const isPasswordValid = await bcrypt.compare(
       loginDto.password,
@@ -169,15 +181,24 @@ export class AuthService {
     );
 
     if (!isPasswordValid) {
-      // Increment failed attempts
+      // ดึงการตั้งค่าความปลอดภัยจาก Database (Admin Settings)
+      const [maxFailedSetting, lockoutDurationSetting] = await Promise.all([
+        this.prisma.adminSetting.findUnique({ where: { key: 'MAX_FAILED_LOGINS' } }),
+        this.prisma.adminSetting.findUnique({ where: { key: 'LOCKOUT_DURATION_MINUTES' } }),
+      ]);
+
+      const maxAttempts = maxFailedSetting?.value ? parseInt(maxFailedSetting.value, 10) : 5;
+      const lockoutMinutes = lockoutDurationSetting?.value ? parseInt(lockoutDurationSetting.value, 10) : 15;
+
       const newAttempts = (user.failedLoginAttempts || 0) + 1;
       let lockedUntil: Date | null = null;
 
-      // Lock account after 5 failed attempts
-      if (newAttempts >= 5) {
-        lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // Lock for 15 minutes
+      // ถ้าใส่ผิดครบตามจำนวนที่ตั้งไว้ ให้ระงับบัญชีตามเวลาที่ตั้งไว้
+      if (newAttempts >= maxAttempts) {
+        lockedUntil = new Date(Date.now() + lockoutMinutes * 60 * 1000);
       }
 
+      // อัปเดตลง Database
       await this.prisma.user.update({
         where: { id: user.id },
         data: {
@@ -186,15 +207,21 @@ export class AuthService {
         },
       });
 
+      // แจ้งเตือนผู้ใช้
       if (lockedUntil) {
         throw new UnauthorizedException(
-          'บัญชีถูกล็อคเนื่องจากใส่รหัสผ่านผิดเกิน 5 ครั้ง กรุณาลองใหม่ในอีก 15 นาที',
+          `คุณใส่รหัสผ่านผิดเกิน ${maxAttempts} ครั้ง ระบบได้ทำการระงับบัญชีชั่วคราวเป็นเวลา ${lockoutMinutes} นาที`,
+        );
+      } else {
+        const remaining = maxAttempts - newAttempts;
+        throw new UnauthorizedException(
+          `ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (เหลือโอกาสอีก ${remaining} ครั้ง)`,
         );
       }
-      throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Successful login, reset failed attempts and update last login
+
+    // ล็อกอินสำเร็จ -> รีเซ็ตกลับเป็น 0
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
@@ -204,6 +231,7 @@ export class AuthService {
         lastLoginIp: ip,
       },
     });
+
 
     const tokens = await this.getTokens(user.id, user.email, user.role.name, user.tokenVersion);
     await this.updateRefreshToken(user.id, tokens.refreshToken);
