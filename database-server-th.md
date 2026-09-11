@@ -22,9 +22,6 @@ Windows Firewall
 
 ## ระบบปฏิบัติการ
 
-```text
-Windows Server 2022 Standard
-หรือ
 Windows Server 2025 Standard
 ```
 
@@ -40,8 +37,8 @@ backup_user
 
 ```text
 CPU: 4 vCPU
-RAM: 8-16 GB
-Storage: 200 GB SSD ขึ้นไป
+RAM: 16 GB
+Storage: 500 GB SSD ขึ้นไป
 ```
 
 หมายเหตุ: ระบบ upload ปัจจุบันเก็บไฟล์แนบเป็น base64 ใน MySQL ดังนั้น Database Server ควรมี storage มากกว่า Frontend และ Backend
@@ -68,8 +65,8 @@ MySQL: 3306
 ## Database
 
 ```text
-Database Name: leave_management
-Application User: leave_app
+Database Name: leave_management-new
+Application User: leave_management
 Backup User: backup_user
 ```
 
