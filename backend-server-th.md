@@ -29,7 +29,13 @@ SSL Certificate
 
 ## ระบบปฏิบัติการ
 
+<<<<<<< HEAD
 
+=======
+```text
+Windows Server 2022 Standard
+หรือ
+>>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
 Windows Server 2025 Standard
 ```
 
@@ -43,9 +49,15 @@ deploy
 ## Spec ที่แนะนำ
 
 ```text
+<<<<<<< HEAD
 CPU: 4 vCPU
 RAM: 8 GB
 Storage: 100 GB SSD
+=======
+CPU: 2-4 vCPU
+RAM: 4-8 GB
+Storage: 80-100 GB SSD
+>>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
 ```
 
 ## Service / Application

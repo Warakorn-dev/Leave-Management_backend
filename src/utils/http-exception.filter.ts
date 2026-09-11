@@ -20,7 +20,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
-      if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
+      
+      if (status === HttpStatus.PAYLOAD_TOO_LARGE) {
+        message = 'ขนาดไฟล์ใหญ่เกินขีดจำกัด (สูงสุดไม่เกิน 10MB)';
+        errors = [message];
+      } else if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
         message = (exceptionResponse as any).message || exception.message;
         errors =
           (exceptionResponse as any).errors ||
@@ -30,6 +34,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
         }
       } else {
         message = exception.message;
+        errors = [message];
+      }
+    } else if (exception && (exception as any).name === 'MulterError') {
+      const multerError = exception as any;
+      if (multerError.code === 'LIMIT_FILE_SIZE') {
+        status = HttpStatus.PAYLOAD_TOO_LARGE;
+        message = 'ไฟล์มีขนาดใหญ่เกินไป (จำกัดไม่เกิน 10MB)';
+        errors = [message];
+      } else {
+        status = HttpStatus.BAD_REQUEST;
+        message = `เกิดข้อผิดพลาดในการอัปโหลดไฟล์: ${multerError.message}`;
         errors = [message];
       }
     } else if (exception instanceof Error) {

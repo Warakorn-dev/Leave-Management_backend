@@ -153,6 +153,7 @@ export class AuthService {
       throw new UnauthorizedException('user ของคุณโดนระงับการใช้งานไปแล้ว');
     }
 
+<<<<<<< HEAD
     // Check if account is locked
     if (user.lockedUntil && user.lockedUntil > new Date()) {
       const remainingTime = Math.ceil(
@@ -195,6 +196,77 @@ export class AuthService {
     }
 
     // Successful login, reset failed attempts and update last login
+=======
+    // 1. ตรวจสอบว่าบัญชีถูกระงับชั่วคราวอยู่หรือไม่
+    if (user.lockedUntil) {
+      // ถ้ายึดเวลาปัจจุบันแล้วยังไม่พ้นเวลาล็อค
+      if (user.lockedUntil > new Date()) {
+        const remainingTime = Math.ceil(
+          (user.lockedUntil.getTime() - Date.now()) / 60000,
+        );
+        throw new UnauthorizedException(
+          `บัญชีถูกระงับชั่วคราวเนื่องจากใส่รหัสผ่านผิดเกินกำหนด กรุณาลองใหม่ในอีก ${remainingTime} นาที`,
+        );
+      } else {
+        // กรณีที่เลย 15 นาทีมาแล้ว (พ้นโทษแบน) ให้รีเซ็ตจำนวนครั้งกลับเป็น 0
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { failedLoginAttempts: 0, lockedUntil: null },
+        });
+        user.failedLoginAttempts = 0;
+        user.lockedUntil = null;
+      }
+    }
+
+
+    const isPasswordValid = await bcrypt.compare(
+      loginDto.password,
+      user.passwordHash,
+    );
+
+    if (!isPasswordValid) {
+      // ดึงการตั้งค่าความปลอดภัยจาก Database (Admin Settings)
+      const [maxFailedSetting, lockoutDurationSetting] = await Promise.all([
+        this.prisma.adminSetting.findUnique({ where: { key: 'MAX_FAILED_LOGINS' } }),
+        this.prisma.adminSetting.findUnique({ where: { key: 'LOCKOUT_DURATION_MINUTES' } }),
+      ]);
+
+      const maxAttempts = maxFailedSetting?.value ? parseInt(maxFailedSetting.value, 10) : 5;
+      const lockoutMinutes = lockoutDurationSetting?.value ? parseInt(lockoutDurationSetting.value, 10) : 15;
+
+      const newAttempts = (user.failedLoginAttempts || 0) + 1;
+      let lockedUntil: Date | null = null;
+
+      // ถ้าใส่ผิดครบตามจำนวนที่ตั้งไว้ ให้ระงับบัญชีตามเวลาที่ตั้งไว้
+      if (newAttempts >= maxAttempts) {
+        lockedUntil = new Date(Date.now() + lockoutMinutes * 60 * 1000);
+      }
+
+      // อัปเดตลง Database
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: newAttempts,
+          lockedUntil,
+        },
+      });
+
+      // แจ้งเตือนผู้ใช้
+      if (lockedUntil) {
+        throw new UnauthorizedException(
+          `คุณใส่รหัสผ่านผิดเกิน ${maxAttempts} ครั้ง ระบบได้ทำการระงับบัญชีชั่วคราวเป็นเวลา ${lockoutMinutes} นาที`,
+        );
+      } else {
+        const remaining = maxAttempts - newAttempts;
+        throw new UnauthorizedException(
+          `ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (เหลือโอกาสอีก ${remaining} ครั้ง)`,
+        );
+      }
+    }
+
+
+    // ล็อกอินสำเร็จ -> รีเซ็ตกลับเป็น 0
+>>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
     await this.prisma.user.update({
       where: { id: user.id },
       data: {
@@ -205,7 +277,12 @@ export class AuthService {
       },
     });
 
+<<<<<<< HEAD
     const tokens = await this.getTokens(user.id, user.email, user.role.name);
+=======
+
+    const tokens = await this.getTokens(user.id, user.email, user.role.name, user.tokenVersion);
+>>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
     await this.updateRefreshToken(user.id, tokens.refreshToken);
 
     return {
@@ -227,7 +304,7 @@ export class AuthService {
   async logout(userId: string) {
     await this.prisma.user.update({
       where: { id: userId },
-      data: { refreshToken: null },
+      data: { refreshToken: null, tokenVersion: { increment: 1 } },
     });
     return { message: 'Logged out successfully' };
   }
@@ -254,7 +331,7 @@ export class AuthService {
       throw new UnauthorizedException('Access Denied');
     }
 
-    const tokens = await this.getTokens(user.id, user.email, user.role.name);
+    const tokens = await this.getTokens(user.id, user.email, user.role.name, user.tokenVersion);
     await this.updateRefreshToken(user.id, tokens.refreshToken);
 
     return tokens;
@@ -304,7 +381,7 @@ export class AuthService {
       const hashedPassword = await bcrypt.hash(resetDto.newPassword, 10);
       await this.prisma.user.update({
         where: { id: payload.sub },
-        data: { passwordHash: hashedPassword, refreshToken: null },
+        data: { passwordHash: hashedPassword, refreshToken: null, tokenVersion: { increment: 1 } },
       });
       return { message: 'Password reset successfully' };
     } catch (e) {
@@ -342,20 +419,47 @@ export class AuthService {
     return { success: true, message: 'Profile updated successfully' };
   }
 
-  private async getTokens(userId: string, email: string, role: string) {
-    const jwtPayload = { sub: userId, email, role };
+  async getPublicConfig() {
+    const setting = await this.prisma.adminSetting.findUnique({
+      where: { key: 'IDLE_TIMEOUT_MINUTES' },
+    });
+    return {
+      idleTimeoutMinutes: setting ? parseInt(setting.value, 10) : 60, // default 60 mins
+    };
+  }
+
+  private async getTokens(userId: string, email: string, role: string, tokenVersion: number = 0) {
+    const jwtPayload = { sub: userId, email, role, tokenVersion };
+
+    // Read JWT_EXPIRATION from DB (Admin Settings UI) if available; fallback to .env
+    const dbJwtSetting = await this.prisma.adminSetting.findUnique({
+      where: { key: 'JWT_EXPIRATION' },
+    });
+    const jwtExpiration =
+      dbJwtSetting?.value ||
+      this.configService.get<string>('jwt.expiration') ||
+      '20m';
+
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(jwtPayload, {
         secret: this.configService.get<string>('jwt.secret') || 'defaultSecret',
+<<<<<<< HEAD
         expiresIn: (this.configService.get<string>('jwt.expiration') ||
           '15m') as any,
+=======
+        expiresIn: jwtExpiration as any,
+>>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
       }),
       this.jwtService.signAsync(jwtPayload, {
         secret:
           this.configService.get<string>('jwt.refreshSecret') ||
           'defaultRefresh',
         expiresIn: (this.configService.get<string>('jwt.refreshExpiration') ||
+<<<<<<< HEAD
           '7d') as any,
+=======
+          '8h') as any,
+>>>>>>> 5e1d8dfcd1ecc98e3ee8708e140219d5d2918252
       }),
     ]);
 
