@@ -1,13 +1,15 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class NotificationService {
-  private transporter: nodemailer.Transporter;
+  private transporter: nodemailer.Transporter<SMTPTransport.SentMessageInfo>;
   private readonly logger = new Logger(NotificationService.name);
 
   constructor(
@@ -25,6 +27,7 @@ export class NotificationService {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- intentionally fire-and-forget, kept async so callers may `await` it without breaking
   async sendEmail(to: string, subject: string, text: string, html?: string) {
     // ทำงานแบบ Fire-and-forget เพื่อไม่ให้ API ค้างเวลารอส่งอีเมล
     this.transporter
@@ -96,7 +99,7 @@ export class NotificationService {
       });
 
       const roleName = user?.role?.name?.toLowerCase() || 'user';
-      let sampleNotifications: any[] = [];
+      let sampleNotifications: Prisma.NotificationUncheckedCreateInput[] = [];
 
       if (roleName === 'ceo') {
         sampleNotifications = [

@@ -29,7 +29,7 @@ export class EmployeeService {
   constructor(
     private prisma: PrismaService,
     private notificationService: NotificationService,
-  ) { }
+  ) {}
 
   /**
    * Portion-aware planner. Compares the requested leave against the
@@ -83,7 +83,7 @@ export class EmployeeService {
             : 'full',
       })),
     }));
-  };
+  }
 
   async createLeaveRequest(userId: string, dto: CreateLeaveRequestDto) {
     const employee = await this.getEmployeeByUserId(userId);
@@ -172,7 +172,7 @@ export class EmployeeService {
       throw new BadRequestException('Leave balance not found');
     }
 
-    const advanceNoticeDays = (balance.leaveType as any).advanceNoticeDays || 0;
+    const advanceNoticeDays = balance.leaveType.advanceNoticeDays || 0;
     if (advanceNoticeDays > 0) {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -190,7 +190,7 @@ export class EmployeeService {
       }
     }
 
-    const minTenureDays = (balance.leaveType as any).minTenureDays || 0;
+    const minTenureDays = balance.leaveType.minTenureDays || 0;
     if (minTenureDays > 0) {
       const joinDate = new Date(employee.hireDate);
       const diffTime = startDate.getTime() - joinDate.getTime();
@@ -256,14 +256,14 @@ export class EmployeeService {
     const calculatedDays =
       dto.leaveMode === 'hourly'
         ? this.calculateWorkingDays(
-          startDate,
-          endDate,
-          holidays.map((h) => h.date),
-          dto.startFormat,
-          dto.endFormat,
-          isMaternityFemale,
-          dto.leaveHours,
-        )
+            startDate,
+            endDate,
+            holidays.map((h) => h.date),
+            dto.startFormat,
+            dto.endFormat,
+            isMaternityFemale,
+            dto.leaveHours,
+          )
         : plan.totalDays;
     // -------------------------
 
@@ -615,7 +615,7 @@ export class EmployeeService {
       );
     }
 
-    const dataToUpdate: any = { ...dto };
+    const dataToUpdate: Record<string, unknown> = { ...dto };
     if (request.status === 'REVIEWING_HR') {
       dataToUpdate.status = 'PENDING_VERIFY';
       dataToUpdate.isViewedByHr = false;
@@ -706,8 +706,7 @@ export class EmployeeService {
         throw new BadRequestException('Leave balance not found');
       }
 
-      const advanceNoticeDays =
-        (balance.leaveType as any)?.advanceNoticeDays || 0;
+      const advanceNoticeDays = balance.leaveType?.advanceNoticeDays || 0;
       if (advanceNoticeDays > 0) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -725,7 +724,7 @@ export class EmployeeService {
         }
       }
 
-      const minTenureDays = (balance.leaveType as any)?.minTenureDays || 0;
+      const minTenureDays = balance.leaveType?.minTenureDays || 0;
       if (minTenureDays > 0) {
         const joinDate = new Date(employee.hireDate);
         const diffTime = newStartDate.getTime() - joinDate.getTime();
@@ -773,14 +772,14 @@ export class EmployeeService {
       );
       const calculatedDays = isHourly
         ? this.calculateWorkingDays(
-          newStartDate,
-          newEndDate,
-          holidays.map((h) => h.date),
-          dto.startFormat || request.startFormat,
-          dto.endFormat || request.endFormat,
-          isMaternityFemale,
-          dto.leaveHours,
-        )
+            newStartDate,
+            newEndDate,
+            holidays.map((h) => h.date),
+            dto.startFormat || request.startFormat,
+            dto.endFormat || request.endFormat,
+            isMaternityFemale,
+            dto.leaveHours,
+          )
         : plan.totalDays;
       // -------------------------
 
@@ -948,72 +947,55 @@ export class EmployeeService {
       );
     }
 
-    if (
-      ![
-        'PENDING_VERIFY',
-        'PENDING_SUPERVISOR',
-        'PENDING_EXECUTIVE',
-        'APPROVED',
-      ].includes(request.status)
-    ) {
+    if (request.status !== 'APPROVED') {
       throw new ForbiddenException(
-        'Only active leave requests can be cancelled',
+        'ไม่สามารถยกเลิกคำขอที่ยังรอการอนุมัติได้ กรุณารอผลการอนุมัติก่อน',
       );
     }
 
-    if (request.status === 'APPROVED') {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const startDay = new Date(request.startDate);
-      startDay.setHours(0, 0, 0, 0);
-      if (startDay <= today) {
-        throw new ForbiddenException(
-          'Cannot cancel an approved leave on or after its start date',
-        );
-      }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startDay = new Date(request.startDate);
+    startDay.setHours(0, 0, 0, 0);
+    if (startDay <= today) {
+      throw new ForbiddenException(
+        'Cannot cancel an approved leave on or after its start date',
+      );
     }
 
     // An approved future leave requires HR confirmation before it is cancelled
     // and its balance is returned.
-    if (request.status === 'APPROVED') {
-      const updatedRequest = await this.prisma.leaveRequest.update({
-        where: { id: requestId },
-        data: { status: 'PENDING_CANCELLATION' },
+    const updatedRequest = await this.prisma.leaveRequest.update({
+      where: { id: requestId },
+      data: { status: 'PENDING_CANCELLATION' },
+    });
+
+    const hrs = await this.prisma.employee.findMany({
+      where: { user: { role: { name: 'HR' } } },
+      include: { user: true },
+    });
+
+    for (const hr of hrs) {
+      await this.prisma.notification.create({
+        data: {
+          userId: hr.userId,
+          title: 'มีคำขอยกเลิกใบลารอตรวจสอบ',
+          message: `${request.employee.firstName} ${request.employee.lastName} ขอยกเลิก${request.leaveType.name}`,
+          type: 'NEW_ORDER',
+          redirectUrl: '/dashboard/hr/approval',
+        },
       });
 
-      const hrs = await this.prisma.employee.findMany({
-        where: { user: { role: { name: 'HR' } } },
-        include: { user: true },
-      });
-
-      for (const hr of hrs) {
-        await this.prisma.notification.create({
-          data: {
-            userId: hr.userId,
-            title: 'มีคำขอยกเลิกใบลารอตรวจสอบ',
-            message: `${request.employee.firstName} ${request.employee.lastName} ขอยกเลิก${request.leaveType.name}`,
-            type: 'NEW_ORDER',
-            redirectUrl: '/dashboard/hr/approval',
-          },
-        });
-
-        if (hr.user.email) {
-          await this.notificationService.sendEmail(
-            hr.user.email,
-            '[Leave Cancellation] รอตรวจสอบ',
-            `${request.employee.firstName} ${request.employee.lastName} ขอยกเลิก${request.leaveType.name}`,
-          );
-        }
+      if (hr.user.email) {
+        await this.notificationService.sendEmail(
+          hr.user.email,
+          '[Leave Cancellation] รอตรวจสอบ',
+          `${request.employee.firstName} ${request.employee.lastName} ขอยกเลิก${request.leaveType.name}`,
+        );
       }
-
-      return updatedRequest;
     }
 
-    // Requests that have not been approved yet may be withdrawn immediately.
-    return this.prisma.leaveRequest.update({
-      where: { id: requestId },
-      data: { status: 'CANCELLED' },
-    });
+    return updatedRequest;
   }
 
   async getMe(userId: string) {
@@ -1047,7 +1029,9 @@ export class EmployeeService {
   async updateAvatar(userId: string, avatarUrl: string) {
     // Base64 is ~33% larger than binary. A 2MB file is roughly 2.8MB in Base64.
     if (avatarUrl && avatarUrl.length > 2.8 * 1024 * 1024) {
-      throw new PayloadTooLargeException('ขนาดไฟล์รูปภาพใหญ่เกินขีดจำกัด (สูงสุดไม่เกิน 2MB)');
+      throw new PayloadTooLargeException(
+        'ขนาดไฟล์รูปภาพใหญ่เกินขีดจำกัด (สูงสุดไม่เกิน 2MB)',
+      );
     }
 
     const oldUser = await this.prisma.user.findUnique({
@@ -1055,7 +1039,10 @@ export class EmployeeService {
     });
 
     if (oldUser?.avatarUrl && oldUser.avatarUrl !== avatarUrl) {
-      if (!oldUser.avatarUrl.startsWith('data:') && !oldUser.avatarUrl.startsWith('http')) {
+      if (
+        !oldUser.avatarUrl.startsWith('data:') &&
+        !oldUser.avatarUrl.startsWith('http')
+      ) {
         try {
           const relativePath = oldUser.avatarUrl.startsWith('/')
             ? oldUser.avatarUrl.substring(1)
@@ -1080,12 +1067,22 @@ export class EmployeeService {
         message: 'Avatar updated successfully',
         avatarUrl: user.avatarUrl,
       };
-    } catch (error: any) {
+    } catch (error) {
       console.error('Prisma update error in updateAvatar:', error);
-      if (error.message?.includes('Server has closed the connection') || error.code === 'P2000' || error.message?.includes('too long') || error.message?.includes('packet')) {
-        throw new PayloadTooLargeException('ขนาดไฟล์รูปภาพใหญ่เกินกว่าที่ฐานข้อมูลจะรองรับได้ (แนะนำขนาดไม่เกิน 2MB)');
+      const err = error as { message?: string; code?: string };
+      if (
+        err.message?.includes('Server has closed the connection') ||
+        err.code === 'P2000' ||
+        err.message?.includes('too long') ||
+        err.message?.includes('packet')
+      ) {
+        throw new PayloadTooLargeException(
+          'ขนาดไฟล์รูปภาพใหญ่เกินกว่าที่ฐานข้อมูลจะรองรับได้ (แนะนำขนาดไม่เกิน 2MB)',
+        );
       }
-      throw new BadRequestException('เกิดข้อผิดพลาดในการอัปเดตรูปภาพ กรุณาลองใหม่อีกครั้ง');
+      throw new BadRequestException(
+        'เกิดข้อผิดพลาดในการอัปเดตรูปภาพ กรุณาลองใหม่อีกครั้ง',
+      );
     }
   }
 

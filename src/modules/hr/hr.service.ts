@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
@@ -20,9 +21,12 @@ import {
 import * as bcrypt from 'bcrypt';
 
 import { NotificationService } from '../notification/notification.service';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class HrService {
+  private readonly logger = new Logger(HrService.name);
+
   constructor(
     private prisma: PrismaService,
     private notificationService: NotificationService,
@@ -398,16 +402,14 @@ export class HrService {
     try {
       await this.prisma.auditLog.create({
         data: {
-          id: require('crypto').randomUUID(),
           action: active ? 'ENABLE_USER' : 'DISABLE_USER',
           entity: 'User',
           entityId: employee.userId,
           details: `User status changed to ${active ? 'active' : 'inactive'}`,
-          updatedAt: new Date(),
         },
       });
     } catch (e) {
-      console.log('Failed to create audit log', e);
+      this.logger.error('Failed to create audit log', e);
     }
 
     return { success: true, isActive: active };
@@ -640,7 +642,7 @@ export class HrService {
       value: monthlyCounts[index],
     }));
 
-    const formattedActivities = activities.map((r: any) => {
+    const formattedActivities = activities.map((r) => {
       let color = 'bg-orange-400';
       let statusText = 'ส่งคำขอแล้ว';
       if (r.status.includes('Approved')) {
@@ -723,7 +725,7 @@ export class HrService {
 
     const leaveTypes = await this.prisma.leaveType.findMany();
 
-    const employeeWhere: any = {};
+    const employeeWhere: Prisma.EmployeeWhereInput = {};
     if (searchQuery) {
       employeeWhere.OR = [
         { firstName: { contains: searchQuery } },
@@ -1249,7 +1251,7 @@ export class HrService {
       nextStatus = 'REJECTED';
     } else {
       const roleName = request.employee.user?.role?.name || '';
-      const posName = (request.employee as any).position?.name || '';
+      const posName = request.employee.position?.name || '';
       const isLeaderOrManager =
         ['Manager', 'CEO'].includes(roleName) ||
         posName.toLowerCase().includes('leader') ||

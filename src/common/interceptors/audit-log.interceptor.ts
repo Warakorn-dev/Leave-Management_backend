@@ -6,18 +6,20 @@ import {
 } from '@nestjs/common';
 import { Observable, throwError } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
+import { Request } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CurrentUser } from '../../modules/auth/types/current-user.type';
 
 @Injectable()
 export class AuditLogInterceptor implements NestInterceptor {
   constructor(private prisma: PrismaService) {}
 
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const ctx = context.switchToHttp();
-    const req = ctx.getRequest();
+    const req = ctx.getRequest<Request>();
 
     // Check if user is authenticated
-    const user = req.user;
+    const user = req.user as CurrentUser | undefined;
 
     // We only log POST, PUT, PATCH, DELETE methods to keep it lightweight
     const method = req.method;
@@ -26,35 +28,53 @@ export class AuditLogInterceptor implements NestInterceptor {
       const ipAddress = req.ip || req.headers['x-forwarded-for'];
 
       return next.handle().pipe(
-        tap((responseData) => {
-          this.logAction(req, user, method, url, ipAddress, responseData, false);
+        tap((responseData: { user?: { id?: string } } | null) => {
+          this.logAction(
+            req,
+            user,
+            method,
+            url,
+            ipAddress,
+            responseData,
+            false,
+          );
         }),
-        catchError((err) => {
+        catchError((err: unknown) => {
           this.logAction(req, user, method, url, ipAddress, null, true);
           return throwError(() => err);
-        })
+        }),
       );
     }
 
     return next.handle();
   }
 
-  private logAction(req: any, user: any, method: string, url: string, ipAddress: any, responseData: any, isError: boolean) {
+  private logAction(
+    req: Request,
+    user: CurrentUser | undefined,
+    method: string,
+    url: string,
+    ipAddress: string | string[] | undefined,
+    responseData: { user?: { id?: string } } | null,
+    isError: boolean,
+  ) {
     let action = method;
     const entity = url.split('/')[2] || 'System';
 
     if (url.includes('/login')) action = isError ? 'LOGIN_FAILED' : 'LOGIN';
-    else if (url.includes('/reset-password')) action = isError ? 'PASSWORD_RESET_FAILED' : 'PASSWORD_RESET';
+    else if (url.includes('/reset-password'))
+      action = isError ? 'PASSWORD_RESET_FAILED' : 'PASSWORD_RESET';
     else if (isError) action = `${method}_FAILED`;
 
-    let resolvedUserId = user ? user.id : null;
+    let resolvedUserId: string | null = user ? user.id : null;
     if (!resolvedUserId && action === 'LOGIN' && responseData?.user?.id) {
       resolvedUserId = responseData.user.id;
     }
 
     let details = `URL: ${url}`;
-    if (url.includes('/login') && req.body) {
-      const attemptedUser = req.body.username || req.body.email;
+    const body = req.body as Record<string, string> | undefined;
+    if (url.includes('/login') && body) {
+      const attemptedUser = body.username || body.email;
       if (attemptedUser) {
         details += ` | Username: ${attemptedUser}`;
       }
@@ -67,7 +87,10 @@ export class AuditLogInterceptor implements NestInterceptor {
           action,
           entity,
           details,
-          ipAddress: typeof ipAddress === 'string' ? ipAddress : JSON.stringify(ipAddress),
+          ipAddress:
+            typeof ipAddress === 'string'
+              ? ipAddress
+              : JSON.stringify(ipAddress),
         },
       })
       .catch((err) => {

@@ -8,7 +8,6 @@ import {
   Param,
   Delete,
   UseGuards,
-  Request,
   Query,
 } from '@nestjs/common';
 import { HrService } from './hr.service';
@@ -29,6 +28,8 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { CurrentUser as CurrentUserPayload } from '../auth/types/current-user.type';
 
 @ApiTags('HR Module')
 @ApiBearerAuth()
@@ -40,9 +41,12 @@ export class HrController {
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Get HR dashboard statistics' })
-  getDashboardStats(@Request() req: any, @Query('year') year?: string) {
+  getDashboardStats(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('year') year?: string,
+  ) {
     return this.hrService.getDashboardStats(
-      req.user.id,
+      user.id,
       year ? parseInt(year) : undefined,
     );
   }
@@ -212,19 +216,19 @@ export class HrController {
 
   @Get('leaves/pending-verify')
   @ApiOperation({ summary: 'Get all pending verify leave requests' })
-  getPendingVerify(@Request() req: any) {
-    return this.hrService.getPendingVerify(req.user.id);
+  getPendingVerify(@CurrentUser() user: CurrentUserPayload) {
+    return this.hrService.getPendingVerify(user.id);
   }
 
   @Put('leaves/:id/verify')
   @ApiOperation({ summary: 'Verify (Approve) or Reject a leave request' })
   processLeaveRequest(
-    @Request() req: any,
+    @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
     @Body('action') action: 'Approve' | 'Reject',
     @Body('comment') comment?: string,
   ) {
-    return this.hrService.processLeaveRequest(req.user.id, id, action, {
+    return this.hrService.processLeaveRequest(user.id, id, action, {
       comment,
     });
   }
@@ -232,12 +236,12 @@ export class HrController {
   @Patch('leaves/:id/view')
   @ApiOperation({ summary: 'Mark a leave request as viewed by HR' })
   markAsViewed(
-    @Request() req: any,
+    @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
     @Query('lock') lock?: string,
   ) {
     const shouldLock = lock !== 'false';
-    return this.hrService.markAsViewed(req.user.id, id, shouldLock);
+    return this.hrService.markAsViewed(user.id, id, shouldLock);
   }
 
   // --- Public Holidays ---

@@ -20,6 +20,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { CurrentUser as CurrentUserPayload } from '../auth/types/current-user.type';
 
 @ApiTags('Employee Leave Module')
 @ApiBearerAuth()
@@ -32,7 +33,7 @@ export class EmployeeController {
   @Post()
   @ApiOperation({ summary: 'Submit a new leave request' })
   createLeaveRequest(
-    @CurrentUser() user: any,
+    @CurrentUser() user: CurrentUserPayload,
     @Body() dto: CreateLeaveRequestDto,
   ) {
     return this.employeeService.createLeaveRequest(user.id, dto);
@@ -40,7 +41,10 @@ export class EmployeeController {
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Get employee dashboard statistics' })
-  getDashboardStats(@CurrentUser() user: any, @Query('year') year?: string) {
+  getDashboardStats(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('year') year?: string,
+  ) {
     return this.employeeService.getDashboardStats(
       user.id,
       year ? parseInt(year) : undefined,
@@ -65,7 +69,7 @@ export class EmployeeController {
       'Per-day leave availability (which half is booked / free) for the current employee',
   })
   getDayAvailability(
-    @CurrentUser() user: any,
+    @CurrentUser() user: CurrentUserPayload,
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
     @Query('excludeRequestId') excludeRequestId?: string,
@@ -80,7 +84,7 @@ export class EmployeeController {
 
   @Get('history')
   @ApiOperation({ summary: 'Get leave history' })
-  getLeaveHistory(@CurrentUser() user: any) {
+  getLeaveHistory(@CurrentUser() user: CurrentUserPayload) {
     return this.employeeService.getLeaveHistory(user.id);
   }
 
@@ -92,32 +96,35 @@ export class EmployeeController {
 
   @Get('department')
   @ApiOperation({ summary: 'Get leave history of the department' })
-  getDepartmentLeaves(@CurrentUser() user: any) {
+  getDepartmentLeaves(@CurrentUser() user: CurrentUserPayload) {
     return this.employeeService.getDepartmentLeaves(user.id);
   }
 
   @Get('me')
   @ApiOperation({ summary: 'Get current employee details' })
-  getMe(@CurrentUser() user: any) {
+  getMe(@CurrentUser() user: CurrentUserPayload) {
     return this.employeeService.getMe(user.id);
   }
 
   @Patch('me/avatar')
   @ApiOperation({ summary: 'Update current employee avatar' })
-  updateAvatar(@CurrentUser() user: any, @Body() dto: { avatarUrl: string }) {
+  updateAvatar(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() dto: { avatarUrl: string },
+  ) {
     return this.employeeService.updateAvatar(user.id, dto.avatarUrl);
   }
 
   @Get('balance')
   @ApiOperation({ summary: 'Get leave balance' })
-  getLeaveBalance(@CurrentUser() user: any) {
+  getLeaveBalance(@CurrentUser() user: CurrentUserPayload) {
     return this.employeeService.getLeaveBalance(user.id);
   }
 
   @Put(':id')
   @ApiOperation({ summary: 'Update a pending leave request' })
   updateLeaveRequest(
-    @CurrentUser() user: any,
+    @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
     @Body() dto: UpdateLeaveRequestDto,
   ) {
@@ -129,7 +136,10 @@ export class EmployeeController {
     summary:
       'Cancel an active leave request; approved future leave requires HR cancellation approval',
   })
-  deleteLeaveRequest(@CurrentUser() user: any, @Param('id') id: string) {
+  deleteLeaveRequest(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('id') id: string,
+  ) {
     return this.employeeService.deleteLeaveRequest(user.id, id);
   }
 }

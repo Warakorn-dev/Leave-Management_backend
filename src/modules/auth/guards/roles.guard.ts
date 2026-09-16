@@ -5,7 +5,9 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { Request } from 'express';
 import { ROLES_KEY } from '../decorators/roles.decorator';
+import { CurrentUser } from '../types/current-user.type';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -19,12 +21,12 @@ export class RolesGuard implements CanActivate {
     if (!requiredRoles) {
       return true;
     }
-    const { user } = context.switchToHttp().getRequest();
-    if (!user || !user.role) {
+    const { user } = context.switchToHttp().getRequest<Request>();
+    const currentUser = user as CurrentUser | undefined;
+    if (!currentUser || !currentUser.role) {
       throw new ForbiddenException('No role found for user');
     }
-    const userRoleName =
-      typeof user.role === 'object' ? user.role.name : user.role;
+    const userRoleName = currentUser.role;
     const hasRole = requiredRoles.includes(userRoleName);
     if (!hasRole) {
       throw new ForbiddenException('Insufficient permissions');

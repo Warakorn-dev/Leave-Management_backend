@@ -4,6 +4,11 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { RefreshTokenUser } from '../types/current-user.type';
+
+interface JwtPayload {
+  sub: string;
+}
 
 @Injectable()
 export class JwtRefreshStrategy extends PassportStrategy(
@@ -23,7 +28,7 @@ export class JwtRefreshStrategy extends PassportStrategy(
     });
   }
 
-  async validate(req: Request, payload: any) {
+  async validate(req: Request, payload: JwtPayload): Promise<RefreshTokenUser> {
     const refreshToken = req.get('Authorization')?.replace('Bearer', '').trim();
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },

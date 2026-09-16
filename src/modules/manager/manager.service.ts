@@ -359,7 +359,7 @@ export class ManagerService {
       select: { startDate: true },
     });
 
-    const monthlyCounts = Array(12).fill(0);
+    const monthlyCounts: number[] = new Array<number>(12).fill(0);
     monthlyStatsRaw.forEach((req) => {
       monthlyCounts[new Date(req.startDate).getMonth()]++;
     });

@@ -20,7 +20,7 @@ export class AnnouncementController {
       const parsedLimit = limit ? parseInt(limit, 10) : undefined;
       const data = await this.announcementService.findAll(parsedLimit);
       return { success: true, data };
-    } catch (error) {
+    } catch {
       return { success: false, message: 'Failed to fetch announcements' };
     }
   }
@@ -32,7 +32,7 @@ export class AnnouncementController {
     try {
       const announcement = await this.announcementService.create(body);
       return { success: true, data: announcement };
-    } catch (error) {
+    } catch {
       return { success: false, message: 'Failed to create announcement' };
     }
   }
@@ -45,7 +45,7 @@ export class AnnouncementController {
     try {
       const announcement = await this.announcementService.update(id, body);
       return { success: true, data: announcement };
-    } catch (error) {
+    } catch {
       return { success: false, message: 'Failed to update announcement' };
     }
   }
@@ -55,7 +55,7 @@ export class AnnouncementController {
     try {
       await this.announcementService.delete(id);
       return { success: true, message: 'Announcement deleted successfully' };
-    } catch (error) {
+    } catch {
       return { success: false, message: 'Failed to delete announcement' };
     }
   }
