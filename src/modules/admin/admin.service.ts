@@ -1,9 +1,6 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import {
   PaginationDto,
@@ -64,7 +61,7 @@ export class AdminService {
     const limit = parseInt(query.limit || '10', 10);
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: Prisma.UserWhereInput = {};
     if (query.search) {
       where.OR = [
         { email: { contains: query.search } },
@@ -102,7 +99,10 @@ export class AdminService {
     ]);
 
     return {
-      items: users.map(({ refreshToken, ...u }) => ({ ...u, isLoggedIn: !!refreshToken })),
+      items: users.map(({ refreshToken, ...u }) => ({
+        ...u,
+        isLoggedIn: !!refreshToken,
+      })),
       meta: {
         total,
         page,
@@ -144,13 +144,15 @@ export class AdminService {
   }
 
   async toggleStatus(userId: string, dto: ToggleUserStatusDto) {
-    const user = await this.prisma.user.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: {
         isActive: dto.isActive,
         ...(dto.isActive ? { lockedUntil: null, failedLoginAttempts: 0 } : {}),
         // If deactivating, also logout
-        ...(dto.isActive === false ? { refreshToken: null, tokenVersion: { increment: 1 } } : {}),
+        ...(dto.isActive === false
+          ? { refreshToken: null, tokenVersion: { increment: 1 } }
+          : {}),
       },
     });
     return { message: `User ${dto.isActive ? 'activated' : 'deactivated'}` };
@@ -253,7 +255,7 @@ export class AdminService {
     return { message: 'Settings updated successfully', data: updated };
   }
 
-  async getSystemHealth() {
+  getSystemHealth() {
     const memory = process.memoryUsage();
     return {
       status: 'OK',
@@ -294,9 +296,9 @@ export class AdminService {
     const rows = logs.map((log) => [
       log.id,
       log.user
-        ? (log.user.employee
-            ? `${log.user.employee.firstName} ${log.user.employee.lastName}`
-            : log.user.username || log.user.email)
+        ? log.user.employee
+          ? `${log.user.employee.firstName} ${log.user.employee.lastName}`
+          : log.user.username || log.user.email
         : 'System',
       log.action,
       log.entity,

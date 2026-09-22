@@ -13,6 +13,11 @@ export interface Response<T> {
   data: T;
 }
 
+interface RawHandlerResult<T> {
+  message?: string;
+  data?: T;
+}
+
 @Injectable()
 export class ResponseInterceptor<T> implements NestInterceptor<T, Response<T>> {
   intercept(
@@ -20,11 +25,14 @@ export class ResponseInterceptor<T> implements NestInterceptor<T, Response<T>> {
     next: CallHandler,
   ): Observable<Response<T>> {
     return next.handle().pipe(
-      map((data) => ({
-        success: true,
-        message: data?.message || 'Request successful',
-        data: data?.data ?? data, // If data contains { message, data }, extract it
-      })),
+      map((data: T | RawHandlerResult<T>) => {
+        const raw = data as RawHandlerResult<T>;
+        return {
+          success: true,
+          message: raw?.message || 'Request successful',
+          data: raw?.data ?? (data as T), // If data contains { message, data }, extract it
+        };
+      }),
     );
   }
 }

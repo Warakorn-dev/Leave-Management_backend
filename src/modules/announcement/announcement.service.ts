@@ -1,19 +1,19 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class AnnouncementService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(limit?: number) {
-    // using 'any' to bypass TS error until Prisma client is regenerated
-    const query: any = {
+  findAll(limit?: number) {
+    const query: Prisma.AnnouncementFindManyArgs = {
       orderBy: { createdAt: 'desc' },
     };
     if (limit) {
       query.take = limit;
     }
-    return (this.prisma as any).announcement.findMany(query);
+    return this.prisma.announcement.findMany(query);
   }
 
   async create(data: {
@@ -21,7 +21,7 @@ export class AnnouncementService {
     subtitle: string;
     isImportant: boolean;
   }) {
-    const item = await (this.prisma as any).announcement.create({
+    const item = await this.prisma.announcement.create({
       data,
     });
 
@@ -47,18 +47,18 @@ export class AnnouncementService {
     return item;
   }
 
-  async update(
+  update(
     id: string,
     data: { title?: string; subtitle?: string; isImportant?: boolean },
   ) {
-    return (this.prisma as any).announcement.update({
+    return this.prisma.announcement.update({
       where: { id },
       data,
     });
   }
 
-  async delete(id: string) {
-    return (this.prisma as any).announcement.delete({
+  delete(id: string) {
+    return this.prisma.announcement.delete({
       where: { id },
     });
   }

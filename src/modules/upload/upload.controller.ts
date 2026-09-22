@@ -19,6 +19,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { CurrentUser as CurrentUserPayload } from '../auth/types/current-user.type';
 import * as fs from 'fs';
 
 @ApiTags('Upload Module')
@@ -49,7 +50,7 @@ export class UploadController {
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Body('leaveRequestId') leaveRequestId: string,
-    @CurrentUser() user: any,
+    @CurrentUser() user: CurrentUserPayload,
   ) {
     if (!file) {
       throw new BadRequestException('กรุณาเลือกไฟล์ก่อนอัปโหลด');
@@ -220,7 +221,7 @@ export class UploadController {
   @UseInterceptors(FileInterceptor('file'))
   async uploadAvatar(
     @UploadedFile() file: Express.Multer.File,
-    @CurrentUser() user: any,
+    @CurrentUser() user: CurrentUserPayload,
   ) {
     if (!file) {
       throw new BadRequestException('File is required');

@@ -10,7 +10,9 @@ import {
   Headers,
   Query,
   Req,
+  UnauthorizedException,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import {
   LoginDto,
@@ -22,6 +24,10 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
+import type {
+  CurrentUser as CurrentUserPayload,
+  RefreshTokenUser,
+} from './types/current-user.type';
 import { AuthGuard } from '@nestjs/passport';
 import { Throttle } from '@nestjs/throttler';
 
@@ -34,7 +40,10 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update user profile (name, phone, password)' })
-  updateProfile(@CurrentUser() user: any, @Body() updateDto: UpdateProfileDto) {
+  updateProfile(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() updateDto: UpdateProfileDto,
+  ) {
     return this.authService.updateProfile(user.id, updateDto);
   }
 
@@ -61,7 +70,7 @@ export class AuthController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login to get JWT tokens' })
-  login(@Body() loginDto: LoginDto, @Req() req: any) {
+  login(@Body() loginDto: LoginDto, @Req() req: Request) {
     const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
     return this.authService.login(
       loginDto,
@@ -74,7 +83,7 @@ export class AuthController {
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Logout and invalidate refresh token' })
-  logout(@CurrentUser() user: any) {
+  logout(@CurrentUser() user: CurrentUserPayload) {
     return this.authService.logout(user.id);
   }
 
@@ -83,7 +92,10 @@ export class AuthController {
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh JWT tokens using refresh token' })
-  refreshTokens(@CurrentUser() user: any) {
+  refreshTokens(@CurrentUser() user: RefreshTokenUser) {
+    if (!user.refreshToken) {
+      throw new UnauthorizedException('Refresh token is missing');
+    }
     return this.authService.refreshTokens(user.id, user.refreshToken);
   }
 

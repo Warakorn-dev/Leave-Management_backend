@@ -14,21 +14,31 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
-    let message = 'Internal server error';
-    let errors: any[] = [];
+    let message: string | string[] = 'Internal server error';
+    let errors: string[] = [];
+
+    interface HttpExceptionBody {
+      message?: string | string[];
+      errors?: string[];
+    }
+    interface MulterErrorLike extends Error {
+      code?: string;
+    }
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
-      
+
       if (status === HttpStatus.PAYLOAD_TOO_LARGE) {
         message = 'ขนาดไฟล์ใหญ่เกินขีดจำกัด (สูงสุดไม่เกิน 10MB)';
         errors = [message];
-      } else if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
-        message = (exceptionResponse as any).message || exception.message;
-        errors =
-          (exceptionResponse as any).errors ||
-          (Array.isArray(message) ? message : [message]);
+      } else if (
+        typeof exceptionResponse === 'object' &&
+        exceptionResponse !== null
+      ) {
+        const body = exceptionResponse as HttpExceptionBody;
+        message = body.message || exception.message;
+        errors = body.errors || (Array.isArray(message) ? message : [message]);
         if (Array.isArray(message)) {
           message = message[0];
         }
@@ -36,8 +46,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
         message = exception.message;
         errors = [message];
       }
-    } else if (exception && (exception as any).name === 'MulterError') {
-      const multerError = exception as any;
+    } else if (exception instanceof Error && exception.name === 'MulterError') {
+      const multerError = exception as MulterErrorLike;
       if (multerError.code === 'LIMIT_FILE_SIZE') {
         status = HttpStatus.PAYLOAD_TOO_LARGE;
         message = 'ไฟล์มีขนาดใหญ่เกินไป (จำกัดไม่เกิน 10MB)';

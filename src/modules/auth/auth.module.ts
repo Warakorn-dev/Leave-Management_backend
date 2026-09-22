@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { NotificationModule } from '../notification/notification.module';
+import type { StringValue } from 'ms';
 
 @Module({
   imports: [
@@ -15,11 +16,11 @@ import { NotificationModule } from '../notification/notification.module';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: async (configService: ConfigService) => ({
+      useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('jwt.secret') || 'defaultSecret',
         signOptions: {
           expiresIn: (configService.get<string>('jwt.expiration') ||
-            '15m') as any,
+            '15m') as StringValue,
         },
       }),
     }),

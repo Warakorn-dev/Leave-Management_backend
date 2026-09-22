@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 
@@ -528,7 +524,7 @@ export class CeoService {
       },
     });
 
-    return employees.map((e: any) => ({
+    return employees.map((e) => ({
       ...e,
       employeeId: e.employeeCode || `EMP-${e.id.substring(0, 5).toUpperCase()}`,
       username: e.user?.username || e.user?.email || '',

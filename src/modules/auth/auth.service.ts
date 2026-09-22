@@ -7,6 +7,7 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import * as svgCaptcha from 'svg-captcha';
 import {
   LoginDto,
   ResetPasswordDto,
@@ -14,6 +15,7 @@ import {
   VerifyCaptchaDto,
 } from './dto/auth.dto';
 import { NotificationService } from '../notification/notification.service';
+import type { StringValue } from 'ms';
 
 @Injectable()
 export class AuthService {
@@ -22,7 +24,7 @@ export class AuthService {
     private jwtService: JwtService,
     private configService: ConfigService,
     private notificationService: NotificationService,
-  ) { }
+  ) {}
 
   async generateCaptcha(theme?: string) {
     const isLight = theme === 'gray' || theme === 'light';
@@ -30,7 +32,6 @@ export class AuthService {
     const bgFill = isLight ? '#000000' : '#ffffff';
     const noiseColor = isLight ? '#444444' : '#cccccc';
 
-    const svgCaptcha = require('svg-captcha');
     const captcha = svgCaptcha.create({
       size: 5,
       noise: 1,
@@ -38,18 +39,21 @@ export class AuthService {
       height: 50,
     });
 
-    let svgData = captcha.data.replace(/<path\b([^>]*)>/g, (match, attrs) => {
-      // Extract the 'd' attribute (the shape data)
-      const dMatch = attrs.match(/d=['"]([^'"]+)['"]/);
-      const d = dMatch ? dMatch[1] : '';
+    let svgData = captcha.data.replace(
+      /<path\b([^>]*)>/g,
+      (_match: string, attrs: string) => {
+        // Extract the 'd' attribute (the shape data)
+        const dMatch = attrs.match(/d=['"]([^'"]+)['"]/);
+        const d = dMatch ? dMatch[1] : '';
 
-      // If it's a noise line (usually has fill="none")
-      if (attrs.includes('fill="none"') || attrs.includes("fill='none'")) {
-        return `<path d="${d}" fill="none" stroke="${noiseColor}" stroke-width="1"/>`;
-      }
-      // Otherwise, it's a text path
-      return `<path d="${d}" fill="${textColor}" stroke="${textColor}" stroke-width="1.5" stroke-linejoin="round"/>`;
-    });
+        // If it's a noise line (usually has fill="none")
+        if (attrs.includes('fill="none"') || attrs.includes("fill='none'")) {
+          return `<path d="${d}" fill="none" stroke="${noiseColor}" stroke-width="1"/>`;
+        }
+        // Otherwise, it's a text path
+        return `<path d="${d}" fill="${textColor}" stroke="${textColor}" stroke-width="1.5" stroke-linejoin="round"/>`;
+      },
+    );
 
     svgData = svgData.replace(
       '>',
@@ -174,7 +178,6 @@ export class AuthService {
       }
     }
 
-
     const isPasswordValid = await bcrypt.compare(
       loginDto.password,
       user.passwordHash,
@@ -183,12 +186,20 @@ export class AuthService {
     if (!isPasswordValid) {
       // ดึงการตั้งค่าความปลอดภัยจาก Database (Admin Settings)
       const [maxFailedSetting, lockoutDurationSetting] = await Promise.all([
-        this.prisma.adminSetting.findUnique({ where: { key: 'MAX_FAILED_LOGINS' } }),
-        this.prisma.adminSetting.findUnique({ where: { key: 'LOCKOUT_DURATION_MINUTES' } }),
+        this.prisma.adminSetting.findUnique({
+          where: { key: 'MAX_FAILED_LOGINS' },
+        }),
+        this.prisma.adminSetting.findUnique({
+          where: { key: 'LOCKOUT_DURATION_MINUTES' },
+        }),
       ]);
 
-      const maxAttempts = maxFailedSetting?.value ? parseInt(maxFailedSetting.value, 10) : 5;
-      const lockoutMinutes = lockoutDurationSetting?.value ? parseInt(lockoutDurationSetting.value, 10) : 15;
+      const maxAttempts = maxFailedSetting?.value
+        ? parseInt(maxFailedSetting.value, 10)
+        : 5;
+      const lockoutMinutes = lockoutDurationSetting?.value
+        ? parseInt(lockoutDurationSetting.value, 10)
+        : 15;
 
       const newAttempts = (user.failedLoginAttempts || 0) + 1;
       let lockedUntil: Date | null = null;
@@ -220,7 +231,6 @@ export class AuthService {
       }
     }
 
-
     // ล็อกอินสำเร็จ -> รีเซ็ตกลับเป็น 0
     await this.prisma.user.update({
       where: { id: user.id },
@@ -232,8 +242,12 @@ export class AuthService {
       },
     });
 
-
-    const tokens = await this.getTokens(user.id, user.email, user.role.name, user.tokenVersion);
+    const tokens = await this.getTokens(
+      user.id,
+      user.email,
+      user.role.name,
+      user.tokenVersion,
+    );
     await this.updateRefreshToken(user.id, tokens.refreshToken);
 
     return {
@@ -282,7 +296,12 @@ export class AuthService {
       throw new UnauthorizedException('Access Denied');
     }
 
-    const tokens = await this.getTokens(user.id, user.email, user.role.name, user.tokenVersion);
+    const tokens = await this.getTokens(
+      user.id,
+      user.email,
+      user.role.name,
+      user.tokenVersion,
+    );
     await this.updateRefreshToken(user.id, tokens.refreshToken);
 
     return tokens;
@@ -326,16 +345,20 @@ export class AuthService {
 
   async resetPassword(resetDto: ResetPasswordDto) {
     try {
-      const payload = this.jwtService.verify(resetDto.token, {
+      const payload = this.jwtService.verify<{ sub: string }>(resetDto.token, {
         secret: this.configService.get('jwt.secret'),
       });
       const hashedPassword = await bcrypt.hash(resetDto.newPassword, 10);
       await this.prisma.user.update({
         where: { id: payload.sub },
-        data: { passwordHash: hashedPassword, refreshToken: null, tokenVersion: { increment: 1 } },
+        data: {
+          passwordHash: hashedPassword,
+          refreshToken: null,
+          tokenVersion: { increment: 1 },
+        },
       });
       return { message: 'Password reset successfully' };
-    } catch (e) {
+    } catch {
       throw new BadRequestException('Invalid or expired token');
     }
   }
@@ -379,7 +402,12 @@ export class AuthService {
     };
   }
 
-  private async getTokens(userId: string, email: string, role: string, tokenVersion: number = 0) {
+  private async getTokens(
+    userId: string,
+    email: string,
+    role: string,
+    tokenVersion: number = 0,
+  ) {
     const jwtPayload = { sub: userId, email, role, tokenVersion };
 
     // Read JWT_EXPIRATION from DB (Admin Settings UI) if available; fallback to .env
@@ -394,14 +422,14 @@ export class AuthService {
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(jwtPayload, {
         secret: this.configService.get<string>('jwt.secret') || 'defaultSecret',
-        expiresIn: jwtExpiration as any,
+        expiresIn: jwtExpiration as StringValue,
       }),
       this.jwtService.signAsync(jwtPayload, {
         secret:
           this.configService.get<string>('jwt.refreshSecret') ||
           'defaultRefresh',
         expiresIn: (this.configService.get<string>('jwt.refreshExpiration') ||
-          '8h') as any,
+          '8h') as StringValue,
       }),
     ]);
 
