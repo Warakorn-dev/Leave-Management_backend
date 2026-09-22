@@ -26,18 +26,16 @@ import * as fs from 'fs';
         },
       }),
       fileFilter: (req, file, cb) => {
-        if (!file.originalname.match(/\.(pdf|doc|docx|png|jpeg|jpg)$/i)) {
+        if (!file.originalname.match(/\.(pdf|png|jpeg|jpg)$/i)) {
           return cb(
-            new Error(
-              'ไม่รองรับประเภทไฟล์นี้ (รองรับเฉพาะ PDF, DOCX, PNG, JPG)',
-            ),
+            new Error('ไม่รองรับประเภทไฟล์นี้ (รองรับเฉพาะ PDF, PNG, JPG)'),
             false,
           );
         }
         cb(null, true);
       },
       limits: {
-        fileSize: 10 * 1024 * 1024, // 10MB limit
+        fileSize: 5 * 1024 * 1024, //
       },
     }),
   ],

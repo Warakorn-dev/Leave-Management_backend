@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
-import { EmployeeService } from './employee.service';
 import { EmployeeController } from './employee.controller';
 import { NotificationModule } from '../notification/notification.module';
+import { EmployeeMutationService } from './services/employee-mutation.service';
+import { EmployeeQueryService } from './services/employee-query.service';
 
 @Module({
   imports: [NotificationModule],
   controllers: [EmployeeController],
-  providers: [EmployeeService],
+  providers: [EmployeeMutationService, EmployeeQueryService],
 })
 export class EmployeeModule {}

@@ -10,7 +10,8 @@ import {
   UseGuards,
   Query,
 } from '@nestjs/common';
-import { EmployeeService } from './employee.service';
+import { EmployeeMutationService } from './services/employee-mutation.service';
+import { EmployeeQueryService } from './services/employee-query.service';
 import {
   CreateLeaveRequestDto,
   UpdateLeaveRequestDto,
@@ -28,7 +29,10 @@ import type { CurrentUser as CurrentUserPayload } from '../auth/types/current-us
 @Roles('Employee', 'Manager', 'HR', 'CEO') // Only actual employee roles
 @Controller('leave')
 export class EmployeeController {
-  constructor(private readonly employeeService: EmployeeService) {}
+  constructor(
+    private readonly employeeMutationService: EmployeeMutationService,
+    private readonly employeeQueryService: EmployeeQueryService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Submit a new leave request' })
@@ -36,7 +40,7 @@ export class EmployeeController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() dto: CreateLeaveRequestDto,
   ) {
-    return this.employeeService.createLeaveRequest(user.id, dto);
+    return this.employeeMutationService.createLeaveRequest(user.id, dto);
   }
 
   @Get('dashboard')
@@ -45,7 +49,7 @@ export class EmployeeController {
     @CurrentUser() user: CurrentUserPayload,
     @Query('year') year?: string,
   ) {
-    return this.employeeService.getDashboardStats(
+    return this.employeeQueryService.getDashboardStats(
       user.id,
       year ? parseInt(year) : undefined,
     );
@@ -54,13 +58,13 @@ export class EmployeeController {
   @Get('types')
   @ApiOperation({ summary: 'Get all leave types' })
   getLeaveTypes() {
-    return this.employeeService.getLeaveTypes();
+    return this.employeeQueryService.getLeaveTypes();
   }
 
   @Get('holidays')
   @ApiOperation({ summary: 'Get public holidays' })
   getPublicHolidays() {
-    return this.employeeService.getPublicHolidays();
+    return this.employeeQueryService.getPublicHolidays();
   }
 
   @Get('day-availability')
@@ -74,7 +78,7 @@ export class EmployeeController {
     @Query('endDate') endDate: string,
     @Query('excludeRequestId') excludeRequestId?: string,
   ) {
-    return this.employeeService.getDayAvailability(
+    return this.employeeQueryService.getDayAvailability(
       user.id,
       startDate,
       endDate,
@@ -85,25 +89,25 @@ export class EmployeeController {
   @Get('history')
   @ApiOperation({ summary: 'Get leave history' })
   getLeaveHistory(@CurrentUser() user: CurrentUserPayload) {
-    return this.employeeService.getLeaveHistory(user.id);
+    return this.employeeQueryService.getLeaveHistory(user.id);
   }
 
   @Get('all-leaves')
   @ApiOperation({ summary: 'Get all company leaves for calendar' })
   getAllCompanyLeaves() {
-    return this.employeeService.getAllCompanyLeaves();
+    return this.employeeQueryService.getAllCompanyLeaves();
   }
 
   @Get('department')
   @ApiOperation({ summary: 'Get leave history of the department' })
   getDepartmentLeaves(@CurrentUser() user: CurrentUserPayload) {
-    return this.employeeService.getDepartmentLeaves(user.id);
+    return this.employeeQueryService.getDepartmentLeaves(user.id);
   }
 
   @Get('me')
   @ApiOperation({ summary: 'Get current employee details' })
   getMe(@CurrentUser() user: CurrentUserPayload) {
-    return this.employeeService.getMe(user.id);
+    return this.employeeQueryService.getMe(user.id);
   }
 
   @Patch('me/avatar')
@@ -112,13 +116,13 @@ export class EmployeeController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() dto: { avatarUrl: string },
   ) {
-    return this.employeeService.updateAvatar(user.id, dto.avatarUrl);
+    return this.employeeQueryService.updateAvatar(user.id, dto.avatarUrl);
   }
 
   @Get('balance')
   @ApiOperation({ summary: 'Get leave balance' })
   getLeaveBalance(@CurrentUser() user: CurrentUserPayload) {
-    return this.employeeService.getLeaveBalance(user.id);
+    return this.employeeQueryService.getLeaveBalance(user.id);
   }
 
   @Put(':id')
@@ -128,7 +132,7 @@ export class EmployeeController {
     @Param('id') id: string,
     @Body() dto: UpdateLeaveRequestDto,
   ) {
-    return this.employeeService.updateLeaveRequest(user.id, id, dto);
+    return this.employeeMutationService.updateLeaveRequest(user.id, id, dto);
   }
 
   @Delete(':id')
@@ -140,6 +144,6 @@ export class EmployeeController {
     @CurrentUser() user: CurrentUserPayload,
     @Param('id') id: string,
   ) {
-    return this.employeeService.deleteLeaveRequest(user.id, id);
+    return this.employeeMutationService.deleteLeaveRequest(user.id, id);
   }
 }

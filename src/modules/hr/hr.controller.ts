@@ -10,7 +10,10 @@ import {
   UseGuards,
   Query,
 } from '@nestjs/common';
-import { HrService } from './hr.service';
+import { HrOrgService } from './services/hr-org.service';
+import { HrEmployeeService } from './services/hr-employee.service';
+import { HrDashboardService } from './services/hr-dashboard.service';
+import { HrLeaveVerificationService } from './services/hr-leave-verification.service';
 import {
   CreateDepartmentDto,
   UpdateDepartmentDto,
@@ -37,7 +40,12 @@ import type { CurrentUser as CurrentUserPayload } from '../auth/types/current-us
 @Roles('HR', 'CEO')
 @Controller('hr')
 export class HrController {
-  constructor(private readonly hrService: HrService) {}
+  constructor(
+    private readonly hrOrgService: HrOrgService,
+    private readonly hrEmployeeService: HrEmployeeService,
+    private readonly hrDashboardService: HrDashboardService,
+    private readonly hrLeaveVerificationService: HrLeaveVerificationService,
+  ) {}
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Get HR dashboard statistics' })
@@ -45,7 +53,7 @@ export class HrController {
     @CurrentUser() user: CurrentUserPayload,
     @Query('year') year?: string,
   ) {
-    return this.hrService.getDashboardStats(
+    return this.hrDashboardService.getDashboardStats(
       user.id,
       year ? parseInt(year) : undefined,
     );
@@ -60,7 +68,7 @@ export class HrController {
     @Query('leaveTypeId') leaveTypeId?: string,
     @Query('status') status?: string,
   ) {
-    return this.hrService.getLeaveSummary({
+    return this.hrDashboardService.getLeaveSummary({
       searchQuery,
       startDate,
       endDate,
@@ -73,107 +81,107 @@ export class HrController {
   @Post('departments')
   @ApiOperation({ summary: 'Create a new department' })
   createDepartment(@Body() dto: CreateDepartmentDto) {
-    return this.hrService.createDepartment(dto);
+    return this.hrOrgService.createDepartment(dto);
   }
 
   @Get('departments')
   @ApiOperation({ summary: 'Get all departments' })
   findAllDepartments() {
-    return this.hrService.findAllDepartments();
+    return this.hrOrgService.findAllDepartments();
   }
 
   @Put('departments/:id')
   @ApiOperation({ summary: 'Update a department' })
   updateDepartment(@Param('id') id: string, @Body() dto: UpdateDepartmentDto) {
-    return this.hrService.updateDepartment(id, dto);
+    return this.hrOrgService.updateDepartment(id, dto);
   }
 
   @Delete('departments/:id')
   @ApiOperation({ summary: 'Delete a department' })
   deleteDepartment(@Param('id') id: string) {
-    return this.hrService.deleteDepartment(id);
+    return this.hrOrgService.deleteDepartment(id);
   }
 
   // --- Roles ---
   @Get('roles')
   @ApiOperation({ summary: 'Get all roles' })
   findAllRoles() {
-    return this.hrService.findAllRoles();
+    return this.hrOrgService.findAllRoles();
   }
 
   // --- Positions ---
   @Post('positions')
   @ApiOperation({ summary: 'Create a new position' })
   createPosition(@Body() dto: CreatePositionDto) {
-    return this.hrService.createPosition(dto);
+    return this.hrOrgService.createPosition(dto);
   }
 
   @Get('positions')
   @ApiOperation({ summary: 'Get all positions' })
   findAllPositions() {
-    return this.hrService.findAllPositions();
+    return this.hrOrgService.findAllPositions();
   }
 
   @Put('positions/:id')
   @ApiOperation({ summary: 'Update a position' })
   updatePosition(@Param('id') id: string, @Body() dto: UpdatePositionDto) {
-    return this.hrService.updatePosition(id, dto);
+    return this.hrOrgService.updatePosition(id, dto);
   }
 
   @Delete('positions/:id')
   @ApiOperation({ summary: 'Delete a position' })
   deletePosition(@Param('id') id: string) {
-    return this.hrService.deletePosition(id);
+    return this.hrOrgService.deletePosition(id);
   }
 
   // --- Leave Types ---
   @Post('leave-types')
   @ApiOperation({ summary: 'Create a new leave type' })
   createLeaveType(@Body() dto: CreateLeaveTypeDto) {
-    return this.hrService.createLeaveType(dto);
+    return this.hrOrgService.createLeaveType(dto);
   }
 
   @Get('leave-types')
   @ApiOperation({ summary: 'Get all leave types' })
   findAllLeaveTypes() {
-    return this.hrService.findAllLeaveTypes();
+    return this.hrOrgService.findAllLeaveTypes();
   }
 
   @Patch('leave-types/:id')
   @ApiOperation({ summary: 'Update a leave type' })
   updateLeaveType(@Param('id') id: string, @Body() dto: UpdateLeaveTypeDto) {
-    return this.hrService.updateLeaveType(id, dto);
+    return this.hrOrgService.updateLeaveType(id, dto);
   }
 
   @Delete('leave-types/:id')
   @ApiOperation({ summary: 'Delete a leave type' })
   deleteLeaveType(@Param('id') id: string) {
-    return this.hrService.deleteLeaveType(id);
+    return this.hrOrgService.deleteLeaveType(id);
   }
 
   // --- Employees ---
   @Post('employees')
   @ApiOperation({ summary: 'Register a new employee and user' })
   createEmployee(@Body() dto: CreateEmployeeDto) {
-    return this.hrService.createEmployee(dto);
+    return this.hrEmployeeService.createEmployee(dto);
   }
 
   @Get('employees')
   @ApiOperation({ summary: 'Get all employees' })
   findAllEmployees() {
-    return this.hrService.findAllEmployees();
+    return this.hrEmployeeService.findAllEmployees();
   }
 
   @Get('employees/:id')
   @ApiOperation({ summary: 'Get employee by id' })
   findEmployeeById(@Param('id') id: string) {
-    return this.hrService.findEmployeeById(id);
+    return this.hrEmployeeService.findEmployeeById(id);
   }
 
   @Patch('employees/:id')
   @ApiOperation({ summary: 'Update an employee' })
   updateEmployee(@Param('id') id: string, @Body() dto: UpdateEmployeeDto) {
-    return this.hrService.updateEmployee(id, dto);
+    return this.hrEmployeeService.updateEmployee(id, dto);
   }
 
   @Patch('employees/:id/status')
@@ -182,13 +190,13 @@ export class HrController {
     @Param('id') id: string,
     @Body('isActive') isActive: boolean,
   ) {
-    return this.hrService.updateEmployeeStatus(id, isActive);
+    return this.hrEmployeeService.updateEmployeeStatus(id, isActive);
   }
 
   @Delete('employees/:id')
   @ApiOperation({ summary: 'Delete an employee (and their user account)' })
   deleteEmployee(@Param('id') id: string) {
-    return this.hrService.deleteEmployee(id);
+    return this.hrEmployeeService.deleteEmployee(id);
   }
 
   @Post('employees/:id/initialize-leave-balances')
@@ -196,7 +204,7 @@ export class HrController {
     summary: 'Initialize leave balances for an employee for the current year',
   })
   initializeLeaveBalances(@Param('id') id: string) {
-    return this.hrService.initializeLeaveBalances(id);
+    return this.hrEmployeeService.initializeLeaveBalances(id);
   }
 
   @Post('employees/:id/reset-leave-balances')
@@ -204,20 +212,20 @@ export class HrController {
     summary: 'Reset leave balances for an employee (set usedDays to 0)',
   })
   resetLeaveBalances(@Param('id') id: string) {
-    return this.hrService.resetLeaveBalances(id);
+    return this.hrEmployeeService.resetLeaveBalances(id);
   }
 
   // --- Leaves ---
   @Get('leaves')
   @ApiOperation({ summary: 'Get all leave requests across the company' })
   findAllLeaves() {
-    return this.hrService.findAllLeaves();
+    return this.hrDashboardService.findAllLeaves();
   }
 
   @Get('leaves/pending-verify')
   @ApiOperation({ summary: 'Get all pending verify leave requests' })
   getPendingVerify(@CurrentUser() user: CurrentUserPayload) {
-    return this.hrService.getPendingVerify(user.id);
+    return this.hrLeaveVerificationService.getPendingVerify(user.id);
   }
 
   @Put('leaves/:id/verify')
@@ -228,9 +236,14 @@ export class HrController {
     @Body('action') action: 'Approve' | 'Reject',
     @Body('comment') comment?: string,
   ) {
-    return this.hrService.processLeaveRequest(user.id, id, action, {
-      comment,
-    });
+    return this.hrLeaveVerificationService.processLeaveRequest(
+      user.id,
+      id,
+      action,
+      {
+        comment,
+      },
+    );
   }
 
   @Patch('leaves/:id/view')
@@ -241,32 +254,36 @@ export class HrController {
     @Query('lock') lock?: string,
   ) {
     const shouldLock = lock !== 'false';
-    return this.hrService.markAsViewed(user.id, id, shouldLock);
+    return this.hrLeaveVerificationService.markAsViewed(
+      user.id,
+      id,
+      shouldLock,
+    );
   }
 
   // --- Public Holidays ---
   @Post('holidays')
   @ApiOperation({ summary: 'Create a new public holiday' })
   createHoliday(@Body() dto: CreatePublicHolidayDto) {
-    return this.hrService.createHoliday(dto);
+    return this.hrOrgService.createHoliday(dto);
   }
 
   @Get('holidays')
   @ApiOperation({ summary: 'Get all public holidays' })
   findAllHolidays() {
-    return this.hrService.findAllHolidays();
+    return this.hrOrgService.findAllHolidays();
   }
 
   @Put('holidays/:id')
   @ApiOperation({ summary: 'Update a public holiday' })
   updateHoliday(@Param('id') id: string, @Body() dto: UpdatePublicHolidayDto) {
-    return this.hrService.updateHoliday(id, dto);
+    return this.hrOrgService.updateHoliday(id, dto);
   }
 
   @Delete('holidays/:id')
   @ApiOperation({ summary: 'Delete a public holiday' })
   deleteHoliday(@Param('id') id: string) {
-    return this.hrService.deleteHoliday(id);
+    return this.hrOrgService.deleteHoliday(id);
   }
 
   // --- Leave Balance Adjustment ---
@@ -276,6 +293,6 @@ export class HrController {
     @Param('id') id: string,
     @Body() dto: UpdateLeaveBalanceDto,
   ) {
-    return this.hrService.updateLeaveBalance(id, dto);
+    return this.hrEmployeeService.updateLeaveBalance(id, dto);
   }
 }

@@ -6,6 +6,7 @@ import {
   UseGuards,
   BadRequestException,
   ForbiddenException,
+  PayloadTooLargeException,
   Body,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -198,6 +199,17 @@ export class UploadController {
       }
 
       console.error('Upload error:', error);
+      const err = error as { message?: string; code?: string };
+      if (
+        err.message?.includes('Server has closed the connection') ||
+        err.code === 'P2000' ||
+        err.message?.includes('too long') ||
+        err.message?.includes('packet')
+      ) {
+        throw new PayloadTooLargeException(
+          'ขนาดไฟล์ใหญ่เกินกว่าที่ฐานข้อมูลจะรองรับได้ กรุณาติดต่อผู้ดูแลระบบหรือลองไฟล์ที่มีขนาดเล็กลง',
+        );
+      }
       throw new BadRequestException(
         `เกิดข้อผิดพลาดในการอัปโหลดไฟล์: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
@@ -271,10 +283,28 @@ export class UploadController {
       );
     }
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { avatarUrl: avatarUrl || `/${file.path.replace(/\\/g, '/')}` },
-    });
+    try {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { avatarUrl: avatarUrl || `/${file.path.replace(/\\/g, '/')}` },
+      });
+    } catch (error) {
+      console.error('Avatar upload error:', error);
+      const err = error as { message?: string; code?: string };
+      if (
+        err.message?.includes('Server has closed the connection') ||
+        err.code === 'P2000' ||
+        err.message?.includes('too long') ||
+        err.message?.includes('packet')
+      ) {
+        throw new PayloadTooLargeException(
+          'ขนาดไฟล์รูปภาพใหญ่เกินกว่าที่ฐานข้อมูลจะรองรับได้ (แนะนำขนาดไม่เกิน 2MB)',
+        );
+      }
+      throw new BadRequestException(
+        'เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ กรุณาลองใหม่อีกครั้ง',
+      );
+    }
 
     return {
       message: 'Avatar uploaded and saved to database successfully',

@@ -1,9 +1,8 @@
 /// <reference types="jest" />
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
-import { EmployeeService } from './employee.service';
-import { PrismaService } from '../../prisma/prisma.service';
-import { NotificationService } from '../notification/notification.service';
+import { EmployeeQueryService } from './employee-query.service';
+import { PrismaService } from '../../../prisma/prisma.service';
 
 /**
  * Focused coverage for the portion-aware availability endpoint. The pure
@@ -11,8 +10,8 @@ import { NotificationService } from '../notification/notification.service';
  * check the service wires Prisma results into a correct per-day answer,
  * including self-exclusion when editing (TEST 11 & TEST 12 at the API layer).
  */
-describe('EmployeeService.getDayAvailability', () => {
-  let service: EmployeeService;
+describe('EmployeeQueryService.getDayAvailability', () => {
+  let service: EmployeeQueryService;
   let prisma: {
     employee: { findUnique: jest.Mock };
     leaveRequest: { findMany: jest.Mock };
@@ -35,13 +34,12 @@ describe('EmployeeService.getDayAvailability', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        EmployeeService,
+        EmployeeQueryService,
         { provide: PrismaService, useValue: prisma },
-        { provide: NotificationService, useValue: { sendEmail: jest.fn() } },
       ],
     }).compile();
 
-    service = module.get(EmployeeService);
+    service = module.get(EmployeeQueryService);
   });
 
   it('marks each day in the range independently around an existing half day', async () => {
