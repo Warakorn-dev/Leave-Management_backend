@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  PayloadTooLargeException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
@@ -28,7 +29,7 @@ export class EmployeeService {
   constructor(
     private prisma: PrismaService,
     private notificationService: NotificationService,
-  ) {}
+  ) { }
 
   /**
    * Portion-aware planner. Compares the requested leave against the
@@ -82,7 +83,7 @@ export class EmployeeService {
             : 'full',
       })),
     }));
-  }
+  };
 
   async createLeaveRequest(userId: string, dto: CreateLeaveRequestDto) {
     const employee = await this.getEmployeeByUserId(userId);
@@ -255,14 +256,14 @@ export class EmployeeService {
     const calculatedDays =
       dto.leaveMode === 'hourly'
         ? this.calculateWorkingDays(
-            startDate,
-            endDate,
-            holidays.map((h) => h.date),
-            dto.startFormat,
-            dto.endFormat,
-            isMaternityFemale,
-            dto.leaveHours,
-          )
+          startDate,
+          endDate,
+          holidays.map((h) => h.date),
+          dto.startFormat,
+          dto.endFormat,
+          isMaternityFemale,
+          dto.leaveHours,
+        )
         : plan.totalDays;
     // -------------------------
 
@@ -772,14 +773,14 @@ export class EmployeeService {
       );
       const calculatedDays = isHourly
         ? this.calculateWorkingDays(
-            newStartDate,
-            newEndDate,
-            holidays.map((h) => h.date),
-            dto.startFormat || request.startFormat,
-            dto.endFormat || request.endFormat,
-            isMaternityFemale,
-            dto.leaveHours,
-          )
+          newStartDate,
+          newEndDate,
+          holidays.map((h) => h.date),
+          dto.startFormat || request.startFormat,
+          dto.endFormat || request.endFormat,
+          isMaternityFemale,
+          dto.leaveHours,
+        )
         : plan.totalDays;
       // -------------------------
 
@@ -1044,33 +1045,48 @@ export class EmployeeService {
   }
 
   async updateAvatar(userId: string, avatarUrl: string) {
+    // Base64 is ~33% larger than binary. A 2MB file is roughly 2.8MB in Base64.
+    if (avatarUrl && avatarUrl.length > 2.8 * 1024 * 1024) {
+      throw new PayloadTooLargeException('ขนาดไฟล์รูปภาพใหญ่เกินขีดจำกัด (สูงสุดไม่เกิน 2MB)');
+    }
+
     const oldUser = await this.prisma.user.findUnique({
       where: { id: userId },
     });
 
     if (oldUser?.avatarUrl && oldUser.avatarUrl !== avatarUrl) {
-      try {
-        const relativePath = oldUser.avatarUrl.startsWith('/')
-          ? oldUser.avatarUrl.substring(1)
-          : oldUser.avatarUrl;
-        const filePath = path.join(process.cwd(), relativePath);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+      if (!oldUser.avatarUrl.startsWith('data:') && !oldUser.avatarUrl.startsWith('http')) {
+        try {
+          const relativePath = oldUser.avatarUrl.startsWith('/')
+            ? oldUser.avatarUrl.substring(1)
+            : oldUser.avatarUrl;
+          const filePath = path.join(process.cwd(), relativePath);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+          }
+        } catch (err) {
+          console.error('Failed to delete old avatar:', err);
         }
-      } catch (err) {
-        console.error('Failed to delete old avatar:', err);
       }
     }
 
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data: { avatarUrl },
-    });
-    return {
-      success: true,
-      message: 'Avatar updated successfully',
-      avatarUrl: user.avatarUrl,
-    };
+    try {
+      const user = await this.prisma.user.update({
+        where: { id: userId },
+        data: { avatarUrl },
+      });
+      return {
+        success: true,
+        message: 'Avatar updated successfully',
+        avatarUrl: user.avatarUrl,
+      };
+    } catch (error: any) {
+      console.error('Prisma update error in updateAvatar:', error);
+      if (error.message?.includes('Server has closed the connection') || error.code === 'P2000' || error.message?.includes('too long') || error.message?.includes('packet')) {
+        throw new PayloadTooLargeException('ขนาดไฟล์รูปภาพใหญ่เกินกว่าที่ฐานข้อมูลจะรองรับได้ (แนะนำขนาดไม่เกิน 2MB)');
+      }
+      throw new BadRequestException('เกิดข้อผิดพลาดในการอัปเดตรูปภาพ กรุณาลองใหม่อีกครั้ง');
+    }
   }
 
   async getLeaveHistory(userId: string) {

@@ -14,7 +14,7 @@ import {
 
 @Injectable()
 export class AdminService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async getOverview() {
     const totalUsers = await this.prisma.user.count();
@@ -195,7 +195,15 @@ export class AdminService {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: { user: { select: { email: true, username: true } } },
+        include: {
+          user: {
+            select: {
+              email: true,
+              username: true,
+              employee: { select: { firstName: true, lastName: true } },
+            },
+          },
+        },
       }),
       this.prisma.auditLog.count(),
     ]);
@@ -242,7 +250,15 @@ export class AdminService {
   async exportAuditLogs() {
     const logs = await this.prisma.auditLog.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { user: { select: { email: true, username: true } } },
+      include: {
+        user: {
+          select: {
+            email: true,
+            username: true,
+            employee: { select: { firstName: true, lastName: true } },
+          },
+        },
+      },
     });
 
     // Create CSV content
@@ -258,7 +274,11 @@ export class AdminService {
     ];
     const rows = logs.map((log) => [
       log.id,
-      log.user ? log.user.email || log.user.username : 'System',
+      log.user
+        ? (log.user.employee
+          ? `${log.user.employee.firstName} ${log.user.employee.lastName}`
+          : log.user.username || log.user.email)
+        : 'System',
       log.action,
       log.entity,
       log.entityId || '-',
