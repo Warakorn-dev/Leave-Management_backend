@@ -15,7 +15,20 @@ import {
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Raster images only (no SVG, which can carry script).
+const SAFE_AVATAR_DATA_URL =
+  /^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i;
+
 /** Employee profile, avatar, and every read-only leave view (history, balance, dashboard, availability). */
+/** Strip the leave reason from rows shown to colleagues (calendars). */
+function withoutPrivateFields<T extends { reason: string | null }>(
+  row: T,
+): Omit<T, 'reason'> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped on purpose
+  const { reason, ...rest } = row;
+  return rest;
+}
+
 @Injectable()
 export class EmployeeQueryService {
   constructor(private prisma: PrismaService) {}
@@ -83,11 +96,21 @@ export class EmployeeQueryService {
     return employee;
   }
 
-  async updateAvatar(userId: string, avatarUrl: string) {
+  async updateAvatar(userId: string, avatarUrl: string | null) {
+    // Security: only a PNG/JPEG/WebP/GIF data URL (or empty = remove the
+    // photo) is accepted. The value used to be stored as-is, and a later update
+    // then deleted "the old avatar file" at that path — so a user could make
+    // the server delete ANY file (e.g. "../.env").
+    if (avatarUrl && !SAFE_AVATAR_DATA_URL.test(avatarUrl)) {
+      throw new BadRequestException(
+        'รูปภาพโปรไฟล์ต้องเป็นไฟล์ JPEG, PNG, WebP หรือ GIF เท่านั้น',
+      );
+    }
+
     // Base64 is ~33% larger than binary. A 2MB file is roughly 2.8MB in Base64.
     if (avatarUrl && avatarUrl.length > 2.8 * 1024 * 1024) {
       throw new PayloadTooLargeException(
-        'ขนาดไฟล์รูปภาพใหญ่เกินขีดจำกัด (สูงสุดไม่เกิน 2MB)',
+        'ขนาดไฟล์รูปภาพใหญ่เกินขีดจำกัด (สูงสุดไม่เกิน 2 MB)',
       );
     }
 
@@ -96,16 +119,20 @@ export class EmployeeQueryService {
     });
 
     if (oldUser?.avatarUrl && oldUser.avatarUrl !== avatarUrl) {
+      // Legacy avatars stored as files: delete only a file that really lives
+      // inside ./uploads (never follow "../" or absolute paths elsewhere).
       if (
         !oldUser.avatarUrl.startsWith('data:') &&
         !oldUser.avatarUrl.startsWith('http')
       ) {
         try {
-          const relativePath = oldUser.avatarUrl.startsWith('/')
-            ? oldUser.avatarUrl.substring(1)
-            : oldUser.avatarUrl;
-          const filePath = path.join(process.cwd(), relativePath);
-          if (fs.existsSync(filePath)) {
+          const uploadsDir = path.resolve(process.cwd(), 'uploads');
+          const relativePath = oldUser.avatarUrl.replace(/^\/+/, '');
+          const filePath = path.resolve(process.cwd(), relativePath);
+          if (
+            filePath.startsWith(uploadsDir + path.sep) &&
+            fs.existsSync(filePath)
+          ) {
             fs.unlinkSync(filePath);
           }
         } catch (err) {
@@ -134,7 +161,7 @@ export class EmployeeQueryService {
         err.message?.includes('packet')
       ) {
         throw new PayloadTooLargeException(
-          'ขนาดไฟล์รูปภาพใหญ่เกินกว่าที่ฐานข้อมูลจะรองรับได้ (แนะนำขนาดไม่เกิน 2MB)',
+          'ขนาดไฟล์รูปภาพใหญ่เกินกว่าที่ฐานข้อมูลจะรองรับได้ (แนะนำขนาดไม่เกิน 2 MB)',
         );
       }
       throw new BadRequestException(
@@ -180,14 +207,15 @@ export class EmployeeQueryService {
     const employee = await this.getEmployeeByUserId(userId);
     if (!employee.departmentId) return [];
 
-    return this.prisma.leaveRequest.findMany({
+    const rows = await this.prisma.leaveRequest.findMany({
       where: {
         employee: { departmentId: employee.departmentId },
       },
       orderBy: { createdAt: 'desc' },
       include: {
         leaveType: true,
-        attachments: true,
+        // Privacy: no attachments, approvals (approver comments) or reason —
+        // colleagues must not see them. Owners get them via /leave/history.
         employee: {
           select: {
             id: true,
@@ -206,22 +234,21 @@ export class EmployeeQueryService {
             },
           },
         },
-        approvals: {
-          orderBy: { createdAt: 'desc' },
-        },
       },
     });
+    return rows.map(withoutPrivateFields);
   }
 
   async getAllCompanyLeaves() {
-    return this.prisma.leaveRequest.findMany({
+    const rows = await this.prisma.leaveRequest.findMany({
       where: {
         OR: [{ status: 'APPROVED' }, { status: 'Approved' }],
       },
       orderBy: { createdAt: 'desc' },
       include: {
         leaveType: true,
-        attachments: true,
+        // Privacy: no attachments, approvals (approver comments) or reason —
+        // colleagues must not see them. Owners get them via /leave/history.
         employee: {
           select: {
             id: true,
@@ -240,11 +267,9 @@ export class EmployeeQueryService {
             },
           },
         },
-        approvals: {
-          orderBy: { createdAt: 'desc' },
-        },
       },
     });
+    return rows.map(withoutPrivateFields);
   }
 
   async getLeaveBalance(userId: string) {
@@ -388,7 +413,7 @@ export class EmployeeQueryService {
         statusText = 'อนุมัติแล้ว';
       } else if (r.status.includes('Rejected')) {
         color = 'bg-red-400';
-        statusText = 'ถูกปฏิเสธ';
+        statusText = 'ไม่อนุมัติ';
       }
       return {
         title: `${r.leaveType.name} - ${statusText}`,

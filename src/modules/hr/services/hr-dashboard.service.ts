@@ -1,6 +1,68 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import {
+  expandLeaveHalves,
+  normalizePortion,
+  toDayKey,
+} from 'src/modules/employee/leave-portion.util';
+
+/** Accepts `YYYY-MM-DD` (or any ISO string) and returns its `YYYY-MM-DD` part. */
+function toDateOnlyKey(value?: string): string | undefined {
+  if (!value) return undefined;
+  const match = /^\d{4}-\d{2}-\d{2}/.exec(value);
+  return match ? match[0] : toDayKey(value) || undefined;
+}
+
+/**
+ * Days of an approved leave that fall inside [fromKey, toKey] (inclusive,
+ * YYYY-MM-DD). A leave entirely inside the range counts its stored totalDays;
+ * one that straddles a boundary is clipped using its per-day portions, falling
+ * back to weekday expansion (capped at totalDays) for legacy rows without them.
+ */
+function daysWithinRange(
+  leave: {
+    startDate: Date;
+    endDate: Date;
+    startFormat: string | null;
+    endFormat: string | null;
+    totalDays: number;
+    days: { date: Date; portion: string }[];
+  },
+  fromKey?: string,
+  toKey?: string,
+): number {
+  const startKey = toDayKey(leave.startDate);
+  const endKey = toDayKey(leave.endDate);
+  const fullyInside =
+    (!fromKey || startKey >= fromKey) && (!toKey || endKey <= toKey);
+  if (fullyInside) return leave.totalDays;
+
+  const inRange = (key: string) =>
+    (!fromKey || key >= fromKey) && (!toKey || key <= toKey);
+
+  if (leave.days.length > 0) {
+    return leave.days
+      .filter((d) => inRange(toDayKey(d.date)))
+      .reduce(
+        (sum, d) => sum + (normalizePortion(d.portion) === 'full' ? 1 : 0.5),
+        0,
+      );
+  }
+
+  let counted = 0;
+  expandLeaveHalves({
+    startDate: leave.startDate,
+    endDate: leave.endDate,
+    startFormat: leave.startFormat,
+    endFormat: leave.endFormat,
+  }).forEach((halves, key) => {
+    const weekday = new Date(`${key}T00:00:00Z`).getUTCDay();
+    if (weekday === 0 || weekday === 6 || !inRange(key)) return;
+    counted += halves.size === 2 ? 1 : 0.5;
+  });
+  return Math.min(counted, leave.totalDays);
+}
 
 /** HR dashboard stats, company-wide leave summary/report, and the raw leaves list. */
 @Injectable()
@@ -101,7 +163,7 @@ export class HrDashboardService {
         statusText = 'อนุมัติแล้ว';
       } else if (r.status.includes('Rejected')) {
         color = 'bg-red-400';
-        statusText = 'ถูกปฏิเสธ';
+        statusText = 'ไม่อนุมัติ';
       }
 
       const timeDiff = Date.now() - new Date(r.createdAt).getTime();
@@ -111,7 +173,7 @@ export class HrDashboardService {
       else if (hours === 0) timeStr = `เมื่อไม่นานมานี้`;
 
       return {
-        title: `${r.employee?.firstName || 'พนักงาน'} ลา${r.leaveType?.name || ''} - ${statusText}`,
+        title: `${r.employee?.firstName || 'พนักงาน'} ${r.leaveType?.name || 'ลา'} - ${statusText}`,
         time: timeStr,
         color,
       };
@@ -173,6 +235,8 @@ export class HrDashboardService {
     status?: string;
   }) {
     const { searchQuery, startDate, endDate, leaveTypeId, status } = filters;
+    const fromKey = toDateOnlyKey(startDate);
+    const toKey = toDateOnlyKey(endDate);
 
     const leaveTypes = await this.prisma.leaveType.findMany();
 
@@ -200,11 +264,16 @@ export class HrDashboardService {
         leaveRequests: {
           where: {
             status: { contains: 'Approved' },
-            ...(startDate ? { startDate: { gte: new Date(startDate) } } : {}),
-            ...(endDate ? { endDate: { lte: new Date(endDate) } } : {}),
+            // Any leave overlapping the range; partial overlaps are clipped below.
+            ...(fromKey
+              ? { endDate: { gte: new Date(`${fromKey}T00:00:00.000Z`) } }
+              : {}),
+            ...(toKey
+              ? { startDate: { lte: new Date(`${toKey}T23:59:59.999Z`) } }
+              : {}),
             ...(leaveTypeId && leaveTypeId !== 'all' ? { leaveTypeId } : {}),
           },
-          include: { leaveType: true },
+          include: { leaveType: true, days: true },
         },
       },
     });
@@ -223,8 +292,9 @@ export class HrDashboardService {
       emp.leaveRequests.forEach((req) => {
         const typeName = req.leaveType?.name;
         if (typeName) {
-          leaveData[typeName] = (leaveData[typeName] || 0) + req.totalDays;
-          totalUsedDays += req.totalDays;
+          const days = daysWithinRange(req, fromKey, toKey);
+          leaveData[typeName] = (leaveData[typeName] || 0) + days;
+          totalUsedDays += days;
         }
       });
 

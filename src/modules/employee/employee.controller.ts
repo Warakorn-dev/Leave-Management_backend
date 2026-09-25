@@ -114,7 +114,7 @@ export class EmployeeController {
   @ApiOperation({ summary: 'Update current employee avatar' })
   updateAvatar(
     @CurrentUser() user: CurrentUserPayload,
-    @Body() dto: { avatarUrl: string },
+    @Body() dto: { avatarUrl: string | null },
   ) {
     return this.employeeQueryService.updateAvatar(user.id, dto.avatarUrl);
   }

@@ -32,7 +32,7 @@ export class NotificationController {
     } catch (e) {
       this.logger.error('Failed to fetch notifications', e);
       throw new InternalServerErrorException(
-        e instanceof Error ? e.message : 'Unknown error',
+        'ไม่สามารถโหลดการแจ้งเตือนได้ กรุณาลองใหม่อีกครั้ง',
       );
     }
   }

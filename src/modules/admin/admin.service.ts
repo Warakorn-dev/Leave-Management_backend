@@ -1,13 +1,41 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { roleChangeSignOut } from '../../common/role-change';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { randomInt } from 'crypto';
 import {
   PaginationDto,
   UpdateSettingsDto,
   UpdateUserRoleDto,
   ToggleUserStatusDto,
 } from './dto/admin.dto';
+
+const ADMIN_ROLE = 'Admin';
+const LAST_ADMIN_MESSAGE =
+  'ต้องมีผู้ดูแลระบบที่ใช้งานได้อย่างน้อย 1 คน จึงไม่สามารถลดสิทธิ์หรือระงับผู้ดูแลระบบคนสุดท้ายได้';
+
+// No look-alike characters (0/O, 1/l/I) so the admin can read it out safely.
+const TEMP_PASSWORD_ALPHABET =
+  'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+const TEMP_PASSWORD_LENGTH = 10;
+
+/**
+ * Temporary password for an admin reset, from a cryptographically secure
+ * generator (Math.random is predictable and could even return fewer than 8
+ * characters). 10 chars from 56 symbols ≈ 58 bits.
+ */
+export function generateTempPassword(): string {
+  let out = '';
+  for (let i = 0; i < TEMP_PASSWORD_LENGTH; i++) {
+    out += TEMP_PASSWORD_ALPHABET[randomInt(TEMP_PASSWORD_ALPHABET.length)];
+  }
+  return out;
+}
 
 @Injectable()
 export class AdminService {
@@ -143,7 +171,37 @@ export class AdminService {
     return { message: 'User forced logout successfully' };
   }
 
-  async toggleStatus(userId: string, dto: ToggleUserStatusDto) {
+  /**
+   * Business rule (2026-09-24): the system always keeps at least one active
+   * Admin. Throws if `userId` is the last active Admin (about to be demoted
+   * or suspended).
+   */
+  private async assertNotLastActiveAdmin(userId: string) {
+    const target = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { isActive: true, role: { select: { name: true } } },
+    });
+    if (!target) throw new NotFoundException('User not found');
+    if (target.role?.name !== ADMIN_ROLE || target.isActive === false) return;
+    const activeAdmins = await this.prisma.user.count({
+      where: { isActive: true, role: { name: ADMIN_ROLE } },
+    });
+    if (activeAdmins <= 1) {
+      throw new BadRequestException(LAST_ADMIN_MESSAGE);
+    }
+  }
+
+  async toggleStatus(
+    actorId: string,
+    userId: string,
+    dto: ToggleUserStatusDto,
+  ) {
+    if (dto.isActive === false) {
+      if (actorId === userId) {
+        throw new BadRequestException('ไม่สามารถระงับบัญชีของตัวเองได้');
+      }
+      await this.assertNotLastActiveAdmin(userId);
+    }
     await this.prisma.user.update({
       where: { id: userId },
       data: {
@@ -159,8 +217,7 @@ export class AdminService {
   }
 
   async resetPassword(userId: string) {
-    // Generate simple random password
-    const tempPassword = Math.random().toString(36).slice(-8);
+    const tempPassword = generateTempPassword();
     const passwordHash = await bcrypt.hash(tempPassword, 10);
 
     await this.prisma.user.update({
@@ -182,10 +239,32 @@ export class AdminService {
     };
   }
 
-  async updateRole(userId: string, dto: UpdateUserRoleDto) {
+  async updateRole(actorId: string, userId: string, dto: UpdateUserRoleDto) {
+    if (actorId === userId) {
+      throw new BadRequestException('ไม่สามารถเปลี่ยนสิทธิ์ของบัญชีตัวเองได้');
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { roleId: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.roleId === dto.roleId) {
+      return { message: 'Role updated successfully' };
+    }
+    const newRole = await this.prisma.role.findUnique({
+      where: { id: dto.roleId },
+      select: { name: true },
+    });
+    if (!newRole) throw new BadRequestException('ไม่พบสิทธิ์ที่เลือก');
+    if (newRole.name !== ADMIN_ROLE) {
+      await this.assertNotLastActiveAdmin(userId);
+    }
+    // Business rule (2026-09-24): a role change signs the user out everywhere,
+    // so their next login shows the menus and pages of the new role (the UI
+    // keeps the role from login time; permissions already follow the DB).
     await this.prisma.user.update({
       where: { id: userId },
-      data: { roleId: dto.roleId },
+      data: roleChangeSignOut(dto.roleId),
     });
     return { message: 'Role updated successfully' };
   }

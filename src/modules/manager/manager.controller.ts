@@ -19,7 +19,9 @@ import type { CurrentUser as CurrentUserPayload } from '../auth/types/current-us
 @ApiTags('Manager Leave Processing Module')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('Manager', 'CEO', 'HR')
+// CEO removed (2026-09-24): the CEO does not act as a department head.
+// HR is admitted here, but the service only lets HR department heads through.
+@Roles('Manager', 'HR')
 @Controller('manager')
 export class ManagerController {
   constructor(private readonly managerService: ManagerService) {}

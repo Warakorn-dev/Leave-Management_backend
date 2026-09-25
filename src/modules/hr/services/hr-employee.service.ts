@@ -11,6 +11,12 @@ import {
   UpdateLeaveBalanceDto,
 } from '../dto/hr.dto';
 import * as bcrypt from 'bcrypt';
+import { roleChangeSignOut } from '../../../common/role-change';
+import {
+  assertHrAssignableRole,
+  assertNotAdminAccount,
+  roleForPosition,
+} from './hr-assignable-role';
 
 /** Employee CRUD, activation status, and leave-balance lifecycle. */
 @Injectable()
@@ -30,13 +36,26 @@ export class HrEmployeeService {
 
     let roleId = dto.roleId;
 
-    // Auto-assign role from position if available
+    // The position decides the role: its own role if set, otherwise the
+    // Leader/HR rule (roleForPosition) — same as when moving position.
     if (dto.positionId) {
       const position = await this.prisma.position.findUnique({
         where: { id: dto.positionId },
+        include: { department: true },
       });
-      if (position && position.roleId) {
+      if (position?.roleId) {
         roleId = position.roleId;
+      } else if (position) {
+        const role = await this.prisma.role.findFirst({
+          where: {
+            name: roleForPosition(
+              position.name,
+              position.department?.name,
+              dto.roleName,
+            ),
+          },
+        });
+        if (role) roleId = role.id;
       }
     }
 
@@ -61,6 +80,8 @@ export class HrEmployeeService {
       }
       if (!roleId) throw new BadRequestException('No default role found');
     }
+
+    await assertHrAssignableRole(this.prisma, roleId);
 
     const rawPassword = dto.password || 'password123';
     const passwordHash = await bcrypt.hash(rawPassword, 10);
@@ -123,10 +144,14 @@ export class HrEmployeeService {
     return this.prisma.$transaction(async (prisma) => {
       const employee = await prisma.employee.findUnique({ where: { id } });
       if (!employee) throw new NotFoundException('Employee not found');
+      await assertNotAdminAccount(prisma, employee.userId);
 
       let updatedRoleId = dto.roleId;
 
-      // Auto-assign role from position if position is updated
+      // Moving to another position sets the role that position implies: the
+      // position's own role if it has one, otherwise the Leader/HR rule
+      // (roleForPosition). This keeps menus, approval rights and leave
+      // routing consistent with the position.
       if (
         dto.positionId !== undefined &&
         dto.positionId !== employee.positionId
@@ -134,9 +159,25 @@ export class HrEmployeeService {
         if (dto.positionId) {
           const position = await prisma.position.findUnique({
             where: { id: dto.positionId },
+            include: { department: true },
           });
-          if (position && position.roleId) {
+          if (position?.roleId) {
             updatedRoleId = position.roleId;
+          } else if (position) {
+            const current = await prisma.user.findUnique({
+              where: { id: employee.userId },
+              select: { role: { select: { name: true } } },
+            });
+            const role = await prisma.role.findFirst({
+              where: {
+                name: roleForPosition(
+                  position.name,
+                  position.department?.name,
+                  current?.role?.name,
+                ),
+              },
+            });
+            if (role) updatedRoleId = role.id;
           }
         }
       }
@@ -148,13 +189,28 @@ export class HrEmployeeService {
         if (role) updatedRoleId = role.id;
       }
 
-      if (dto.email || dto.username || updatedRoleId) {
+      await assertHrAssignableRole(prisma, updatedRoleId);
+
+      // A real role change also signs the user out (see roleChangeSignOut).
+      const currentRoleId = updatedRoleId
+        ? (
+            await prisma.user.findUnique({
+              where: { id: employee.userId },
+              select: { roleId: true },
+            })
+          )?.roleId
+        : undefined;
+      const roleChanged = !!updatedRoleId && updatedRoleId !== currentRoleId;
+
+      if (dto.email || dto.username || roleChanged) {
         await prisma.user.update({
           where: { id: employee.userId },
           data: {
             ...(dto.email ? { email: dto.email } : {}),
             ...(dto.username ? { username: dto.username } : {}),
-            ...(updatedRoleId ? { roleId: updatedRoleId } : {}),
+            ...(roleChanged && updatedRoleId
+              ? roleChangeSignOut(updatedRoleId)
+              : {}),
           },
         });
       }
@@ -194,6 +250,7 @@ export class HrEmployeeService {
 
     const employee = await this.prisma.employee.findUnique({ where: { id } });
     if (!employee) throw new NotFoundException('Employee not found');
+    await assertNotAdminAccount(this.prisma, employee.userId);
 
     await this.prisma.user.update({
       where: { id: employee.userId },
@@ -367,6 +424,7 @@ export class HrEmployeeService {
       include: { user: true },
     });
     if (!employee) throw new NotFoundException('Employee not found');
+    await assertNotAdminAccount(this.prisma, employee.userId);
 
     return this.prisma.$transaction(async (prisma) => {
       await prisma.employee.delete({ where: { id } });
