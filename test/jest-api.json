@@ -1,0 +1,12 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": "..",
+  "modulePaths": ["<rootDir>"],
+  "testEnvironment": "node",
+  "testRegex": "test/api/.*\\.api-spec\\.ts$",
+  "setupFiles": ["<rootDir>/test/api/e2e-env.ts"],
+  "testTimeout": 60000,
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  }
+}
