@@ -12,7 +12,7 @@ import { AnnouncementService } from './announcement.service';
 
 @Controller('announcement')
 export class AnnouncementController {
-  constructor(private readonly announcementService: AnnouncementService) {}
+  constructor(private readonly announcementService: AnnouncementService) { }
 
   @Get()
   async getAnnouncements(@Query('limit') limit?: string) {
@@ -27,7 +27,7 @@ export class AnnouncementController {
 
   @Post()
   async createAnnouncement(
-    @Body() body: { title: string; subtitle: string; isImportant: boolean },
+    @Body() body: { title: string; subtitle: string; isImportant: boolean; attachmentData?: string; attachmentName?: string },
   ) {
     try {
       const announcement = await this.announcementService.create(body);
