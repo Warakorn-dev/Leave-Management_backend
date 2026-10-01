@@ -7,6 +7,10 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ProcessLeaveRequestDto } from './dto/manager.dto';
 import { NotificationService } from '../notification/notification.service';
+import {
+  isLeaderPosition,
+  leaveHistoryUrlForRole,
+} from '../notification/leave-history-url';
 
 @Injectable()
 export class ManagerService {
@@ -101,6 +105,12 @@ export class ManagerService {
       throw new BadRequestException('Invalid request or already processed');
     }
 
+    if (request.employeeId === manager.id) {
+      throw new ForbiddenException(
+        'คุณไม่สามารถอนุมัติหรือไม่อนุมัติคำขอลาของตนเองได้',
+      );
+    }
+
     if (action === 'Reject' && !dto.comment?.trim()) {
       throw new BadRequestException('A rejection reason is required');
     }
@@ -122,10 +132,20 @@ export class ManagerService {
 
     return this.prisma
       .$transaction(async (prisma) => {
-        // 1. Update Request Status
-        const updatedRequest = await prisma.leaveRequest.update({
-          where: { id: requestId },
+        // 1. Claim the request atomically: the status changes only if it is
+        // still waiting for the department head. A second click (or a
+        // simultaneous approve + reject) updates nothing and is refused, and
+        // throwing here rolls the whole transaction back — so the approval
+        // log and the balance deduction can never happen twice.
+        const claimed = await prisma.leaveRequest.updateMany({
+          where: { id: requestId, status: 'PENDING_SUPERVISOR' },
           data: { status: nextStatus },
+        });
+        if (claimed.count === 0) {
+          throw new BadRequestException('Invalid request or already processed');
+        }
+        const updatedRequest = await prisma.leaveRequest.findUniqueOrThrow({
+          where: { id: requestId },
         });
 
         // 2. Add Approval Log
@@ -177,6 +197,7 @@ export class ManagerService {
         try {
           const employeeUser = await this.prisma.user.findUnique({
             where: { id: request.employee.userId },
+            include: { role: true },
           });
           const statusText = nextStatus.includes('APPROVED')
             ? 'อนุมัติ'
@@ -190,21 +211,23 @@ export class ManagerService {
                 userId: employeeUser.id,
                 title:
                   statusText === 'ปฏิเสธ'
-                    ? 'คำขอลาถูกปฏิเสธโดย Manager'
+                    ? 'คำขอลาถูกปฏิเสธโดยหัวหน้าแผนก'
                     : statusText === 'อนุมัติ'
-                      ? 'คำขอลาได้รับการอนุมัติโดย Manager'
+                      ? 'คำขอลาได้รับการอนุมัติโดยหัวหน้าแผนก'
                       : 'ความคืบหน้าคำขอลาของคุณ',
                 message:
                   statusText === 'ส่งต่อให้ผู้บริหารพิจารณา'
-                    ? `คำขอ${request.leaveType.name} ของคุณได้รับการตรวจสอบโดยผู้จัดการแล้ว กำลังรอผู้บริหารอนุมัติ`
-                    : `คำขอ${request.leaveType.name} ของคุณได้รับการ${statusText}โดยผู้จัดการแผนกเรียบร้อยแล้ว`,
+                    ? `คำขอ${request.leaveType.name} ของคุณได้รับการตรวจสอบโดยหัวหน้าแผนกแล้ว กำลังรอผู้บริหารอนุมัติ`
+                    : statusText === 'ปฏิเสธ'
+                      ? `คำขอ${request.leaveType.name}ของคุณไม่ได้รับการอนุมัติจากหัวหน้าแผนก\nเหตุผล: ${dto.comment?.trim()}`
+                      : `คำขอ${request.leaveType.name} ของคุณได้รับการ${statusText}โดยหัวหน้าแผนกเรียบร้อยแล้ว`,
                 type:
                   statusText === 'ปฏิเสธ'
                     ? 'REJECT'
                     : statusText === 'อนุมัติ'
                       ? 'APPROVE'
                       : 'SYSTEM',
-                redirectUrl: '/dashboard/user/history',
+                redirectUrl: leaveHistoryUrlForRole(employeeUser.role?.name),
               },
             });
           }
@@ -215,7 +238,7 @@ export class ManagerService {
               statusText === 'อนุมัติ'
                 ? `[Leave Request] คำขอลางานของคุณได้รับการอนุมัติ`
                 : `[Leave Request] ความคืบหน้าคำขอลางานของคุณ`,
-              `เรียน ${request.employee.firstName},\n\nคำขอลา${request.leaveType.name} ของคุณ (วันที่ ${request.startDate.toLocaleDateString()} ถึง ${request.endDate.toLocaleDateString()}) ${statusText === 'ส่งต่อให้ผู้บริหารพิจารณา' ? 'กำลังรอการอนุมัติจากผู้บริหาร' : `ได้ถูก${statusText}โดยหัวหน้างานแล้ว`}\nหมายเหตุ: ${dto.comment || '-'}\n\nคุณสามารถตรวจสอบสถานะได้ในระบบ`,
+              `เรียน ${request.employee.firstName},\n\nคำขอ${request.leaveType.name} ของคุณ (วันที่ ${request.startDate.toLocaleDateString()} ถึง ${request.endDate.toLocaleDateString()}) ${statusText === 'ส่งต่อให้ผู้บริหารพิจารณา' ? 'กำลังรอการอนุมัติจากผู้บริหาร' : `ได้ถูก${statusText}โดยหัวหน้างานแล้ว`}\nหมายเหตุ: ${dto.comment || '-'}\n\nคุณสามารถตรวจสอบสถานะได้ในระบบ`,
             );
           }
 
@@ -231,8 +254,8 @@ export class ManagerService {
                   title:
                     statusText === 'อนุมัติ'
                       ? 'คำขอลาพนักงานได้รับการอนุมัติ'
-                      : 'การตรวจสอบคำขอลาโดยผู้จัดการ',
-                  message: `คำขอลา ${request.leaveType.name} ของ "${request.employee.firstName} ${request.employee.lastName}" ได้ถูก${statusText}โดยหัวหน้างานแล้ว`,
+                      : 'การตรวจสอบคำขอลาโดยหัวหน้าแผนก',
+                  message: `คำขอ${request.leaveType.name} ของ "${request.employee.firstName} ${request.employee.lastName}" ได้ถูก${statusText}โดยหัวหน้าแผนกแล้ว`,
                   type: 'SYSTEM',
                   redirectUrl: '/dashboard/hr/leave-history',
                 },
@@ -243,8 +266,8 @@ export class ManagerService {
                 hr.email,
                 statusText === 'อนุมัติ'
                   ? `[Leave Request] คำขอลาพนักงานได้รับการอนุมัติแล้ว`
-                  : `[Leave Request] แจ้งเตือนการตรวจสอบคำขอลาโดยผู้จัดการ`,
-                `เรียนฝ่ายบุคคล (HR),\n\nคำขอลา${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} ได้ถูก${statusText}โดยหัวหน้างานแล้ว\nหมายเหตุ: ${dto.comment || '-'}\n\nคุณสามารถตรวจสอบรายละเอียดได้ในระบบ`,
+                  : `[Leave Request] แจ้งเตือนการตรวจสอบคำขอลาโดยหัวหน้าแผนก`,
+                `เรียนฝ่ายบุคคล (HR),\n\nคำขอ${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} ได้ถูก${statusText}โดยหัวหน้าแผนกแล้ว\nหมายเหตุ: ${dto.comment || '-'}\n\nคุณสามารถตรวจสอบรายละเอียดได้ในระบบ`,
               );
             }
           }
@@ -259,8 +282,8 @@ export class ManagerService {
                 await this.prisma.notification.create({
                   data: {
                     userId: ceo.id,
-                    title: 'มีคำขอลาจากผู้จัดการแผนกส่งต่อมา',
-                    message: `ผู้จัดการได้ส่งต่อคำขอ ${request.leaveType.name} ของ "${request.employee.firstName} ${request.employee.lastName}"`,
+                    title: 'มีคำขอลาจากหัวหน้าแผนกส่งต่อมา',
+                    message: `หัวหน้าแผนกได้ส่งต่อคำขอ ${request.leaveType.name} ของ "${request.employee.firstName} ${request.employee.lastName}"`,
                     type: 'NEW_ORDER',
                     redirectUrl: '/dashboard/ceo/approval',
                   },
@@ -269,8 +292,8 @@ export class ManagerService {
               if (ceo.email) {
                 await this.notificationService.sendEmail(
                   ceo.email,
-                  `[Leave Request] คำขอลาพักผ่อนส่งต่อจากผู้จัดการ`,
-                  `เรียน CEO,\n\n${request.employee.firstName} ${request.employee.lastName} ได้ยื่นคำขอลาพักผ่อน ซึ่งผ่านการตรวจสอบจากหัวหน้างานแล้ว\nกรุณาเข้าสู่ระบบเพื่ออนุมัติ`,
+                  `[Leave Request] คำขอ${request.leaveType.name}ส่งต่อจากหัวหน้าแผนก`,
+                  `เรียน CEO,\n\n${request.employee.firstName} ${request.employee.lastName} ได้ยื่นคำขอ${request.leaveType.name} ซึ่งผ่านการตรวจสอบจากหัวหน้าแผนกแล้ว\nกรุณาเข้าสู่ระบบเพื่ออนุมัติ`,
                 );
               }
             }
@@ -291,11 +314,7 @@ export class ManagerService {
 
     const roleName = employee.user?.role?.name;
     if (roleName === 'HR') {
-      const posName = employee.position?.name || '';
-      const isLeader =
-        posName.toLowerCase().includes('leader') ||
-        posName.toLowerCase().includes('manager');
-      if (!isLeader) {
+      if (!isLeaderPosition(employee.position?.name)) {
         throw new ForbiddenException(
           'Only HR department heads can access manager approval functions',
         );
@@ -403,7 +422,7 @@ export class ManagerService {
       })),
       activities: activities.map((req) => {
         let type = 'leave';
-        let title = `${req.employee?.firstName || 'พนักงาน'} ส่งคำขอลา${req.leaveType?.name || 'ลา'} ${req.totalDays || 1} วัน`;
+        let title = `${req.employee?.firstName || 'พนักงาน'} ส่งคำขอ${req.leaveType?.name || 'ลา'} ${req.totalDays || 1} วัน`;
         if (req.status === 'Approved') {
           type = 'approve';
           title = `หัวหน้าอนุมัติการลาของ ${req.employee?.firstName || 'พนักงาน'}`;

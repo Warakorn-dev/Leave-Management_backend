@@ -284,6 +284,9 @@ model User {
   lastLoginAt         DateTime?
   lastLoginIp         String?
   tokenVersion        Int       @default(0)
+  // Set when the user sets their own password (profile change or reset link).
+  // Null = never changed: the first profile change needs no current password.
+  passwordChangedAt   DateTime?
 
   auditLog      AuditLog[]
   employee      Employee?

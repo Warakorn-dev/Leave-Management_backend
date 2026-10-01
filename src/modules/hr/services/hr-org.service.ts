@@ -14,6 +14,11 @@ import {
   CreatePublicHolidayDto,
   UpdatePublicHolidayDto,
 } from '../dto/hr.dto';
+import { roleChangeSignOut } from '../../../common/role-change';
+import {
+  assertHrAssignableRole,
+  HR_UNASSIGNABLE_ROLE,
+} from './hr-assignable-role';
 
 /** Org-structure CRUD: departments, roles, positions, leave types, public holidays. */
 @Injectable()
@@ -39,7 +44,9 @@ export class HrOrgService {
 
   // --- Roles ---
   async findAllRoles() {
+    // Only roles HR may assign (Admin is managed from the Admin area).
     const roles = await this.prisma.role.findMany({
+      where: { name: { not: HR_UNASSIGNABLE_ROLE } },
       orderBy: { name: 'asc' },
     });
     return { success: true, data: roles };
@@ -47,6 +54,8 @@ export class HrOrgService {
 
   // --- Positions ---
   async createPosition(dto: CreatePositionDto) {
+    await assertHrAssignableRole(this.prisma, dto.roleId);
+
     if (dto.roleId && dto.departmentId) {
       const role = await this.prisma.role.findUnique({
         where: { id: dto.roleId },
@@ -60,7 +69,7 @@ export class HrOrgService {
         });
         if (existingManager) {
           throw new BadRequestException(
-            'แผนกนี้มีตำแหน่งผู้จัดการ (Manager) อยู่แล้ว ไม่สามารถเพิ่มได้อีก',
+            'แผนกนี้มีตำแหน่งหัวหน้าแผนก (Manager) อยู่แล้ว ไม่สามารถเพิ่มได้อีก',
           );
         }
       }
@@ -86,6 +95,9 @@ export class HrOrgService {
     return this.prisma.$transaction(async (prisma) => {
       const existingPos = await prisma.position.findUnique({ where: { id } });
       if (!existingPos) throw new NotFoundException('Position not found');
+      // A position's role cascades to everyone holding it, so this also
+      // keeps HR from turning a group of employees into Admins.
+      await assertHrAssignableRole(prisma, dto.roleId);
       const deptId = dto.departmentId || existingPos.departmentId;
 
       if (dto.roleId && deptId) {
@@ -102,7 +114,7 @@ export class HrOrgService {
           });
           if (existingManager) {
             throw new BadRequestException(
-              'แผนกนี้มีตำแหน่งผู้จัดการ (Manager) อยู่แล้ว ไม่สามารถเพิ่มได้อีก',
+              'แผนกนี้มีตำแหน่งหัวหน้าแผนก (Manager) อยู่แล้ว ไม่สามารถเพิ่มได้อีก',
             );
           }
         }
@@ -118,9 +130,14 @@ export class HrOrgService {
         },
       });
 
+      // Cascades below never touch Admin accounts (HR may not edit them).
+      const notAdmin = {
+        user: { role: { name: { not: HR_UNASSIGNABLE_ROLE } } },
+      };
+
       if (dto.departmentId) {
         await prisma.employee.updateMany({
-          where: { positionId: id },
+          where: { positionId: id, ...notAdmin },
           data: { departmentId: dto.departmentId },
         });
       }
@@ -139,12 +156,16 @@ export class HrOrgService {
 
         if (assignedRoleId) {
           const employees = await prisma.employee.findMany({
-            where: { positionId: id },
+            where: { positionId: id, ...notAdmin },
+            include: { user: { select: { roleId: true } } },
           });
           for (const emp of employees) {
+            // Only holders whose role really changes are updated — and signed
+            // out, so their next login shows the new role's UI.
+            if (emp.user?.roleId === assignedRoleId) continue;
             await prisma.user.update({
               where: { id: emp.userId },
-              data: { roleId: assignedRoleId },
+              data: roleChangeSignOut(assignedRoleId),
             });
           }
         }

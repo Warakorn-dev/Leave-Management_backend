@@ -1,6 +1,11 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
+import { leaveHistoryUrlForRole } from '../notification/leave-history-url';
 
 @Injectable()
 export class CeoService {
@@ -122,7 +127,7 @@ export class CeoService {
         color = 'bg-emerald-500';
       }
       if (leave.status === 'REJECTED') {
-        action = 'ถูกปฏิเสธ';
+        action = 'ไม่อนุมัติ';
         color = 'bg-red-500';
       }
       if (['CANCELLED', 'Cancelled'].includes(leave.status)) {
@@ -314,6 +319,14 @@ export class CeoService {
       throw new BadRequestException('Request is not waiting for CEO approval');
     }
 
+    // No approver above the CEO is defined yet; blocking self-approval is the
+    // only rule applied here (who approves a CEO's own leave is a business decision).
+    if (request.employee.userId === ceoUserId) {
+      throw new ForbiddenException(
+        'คุณไม่สามารถอนุมัติหรือไม่อนุมัติคำขอลาของตนเองได้',
+      );
+    }
+
     if (action === 'Reject' && !comment?.trim()) {
       throw new BadRequestException('A rejection reason is required');
     }
@@ -322,9 +335,20 @@ export class CeoService {
 
     return this.prisma
       .$transaction(async (prisma) => {
-        const updated = await prisma.leaveRequest.update({
-          where: { id: requestId },
+        // Claim atomically: only while still waiting for the CEO. A double
+        // click is refused here and the transaction rolls back, so the
+        // approval log and balance deduction happen exactly once.
+        const claimed = await prisma.leaveRequest.updateMany({
+          where: { id: requestId, status: 'PENDING_EXECUTIVE' },
           data: { status: nextStatus },
+        });
+        if (claimed.count === 0) {
+          throw new BadRequestException(
+            'Request is not waiting for CEO approval',
+          );
+        }
+        const updated = await prisma.leaveRequest.findUniqueOrThrow({
+          where: { id: requestId },
         });
 
         await prisma.leaveApproval.create({
@@ -409,13 +433,7 @@ export class CeoService {
             include: { role: true },
           });
           const statusText = nextStatus === 'APPROVED' ? 'อนุมัติ' : 'ปฏิเสธ';
-          const userRole = employeeUser?.role?.name?.toLowerCase() || 'user';
-          const redirectUrl =
-            userRole === 'manager'
-              ? '/dashboard/manager/history'
-              : userRole === 'hr'
-                ? '/dashboard/hr/leave-history'
-                : '/dashboard/user/history';
+          const redirectUrl = leaveHistoryUrlForRole(employeeUser?.role?.name);
 
           if (employeeUser?.id) {
             await this.prisma.notification.create({
@@ -425,7 +443,10 @@ export class CeoService {
                   statusText === 'อนุมัติ'
                     ? 'คำขอลาได้รับการอนุมัติจาก CEO'
                     : 'คำขอลาถูกปฏิเสธโดย CEO',
-                message: `คำขอ${request.leaveType.name} ของคุณได้รับการ${statusText}โดย CEO เรียบร้อยแล้ว`,
+                message:
+                  statusText === 'อนุมัติ'
+                    ? `คำขอ${request.leaveType.name} ของคุณได้รับการอนุมัติโดย CEO เรียบร้อยแล้ว`
+                    : `คำขอ${request.leaveType.name}ของคุณไม่ได้รับการอนุมัติจากผู้บริหาร (CEO)\nเหตุผล: ${comment?.trim()}`,
                 type: statusText === 'อนุมัติ' ? 'APPROVE' : 'REJECT',
                 redirectUrl,
               },
@@ -438,7 +459,7 @@ export class CeoService {
               statusText === 'อนุมัติ'
                 ? `[Leave Request] คำขอลางานของคุณได้รับการอนุมัติแล้ว`
                 : `[Leave Request] คำขอลางานของคุณถูก${statusText}`,
-              `เรียน ${request.employee.firstName},\n\nคำขอลา${request.leaveType.name} ของคุณ (วันที่ ${request.startDate.toLocaleDateString()} ถึง ${request.endDate.toLocaleDateString()}) ได้ถูก${statusText}โดย CEO แล้ว\nหมายเหตุ: ${comment || '-'}\n\nคุณสามารถตรวจสอบสถานะได้ในระบบ`,
+              `เรียน ${request.employee.firstName},\n\nคำขอ${request.leaveType.name} ของคุณ (วันที่ ${request.startDate.toLocaleDateString()} ถึง ${request.endDate.toLocaleDateString()}) ได้ถูก${statusText}โดย CEO แล้ว\nหมายเหตุ: ${comment || '-'}\n\nคุณสามารถตรวจสอบสถานะได้ในระบบ`,
             );
           }
 
@@ -455,7 +476,7 @@ export class CeoService {
                     statusText === 'อนุมัติ'
                       ? 'คำขอลาพนักงานได้รับการอนุมัติ'
                       : 'การตรวจสอบคำขอลาโดยผู้บริหาร (CEO)',
-                  message: `คำขอลา ${request.leaveType.name} ของ "${request.employee.firstName} ${request.employee.lastName}" ได้ถูก${statusText}โดยผู้บริหารแล้ว`,
+                  message: `คำขอ${request.leaveType.name} ของ "${request.employee.firstName} ${request.employee.lastName}" ได้ถูก${statusText}โดยผู้บริหารแล้ว`,
                   type: 'SYSTEM',
                   redirectUrl: '/dashboard/hr/leave-history',
                 },
@@ -467,7 +488,7 @@ export class CeoService {
                 statusText === 'อนุมัติ'
                   ? `[Leave Request] คำขอลาพนักงานได้รับการอนุมัติแล้ว`
                   : `[Leave Request] แจ้งเตือนการตรวจสอบคำขอลาโดยผู้บริหาร (CEO)`,
-                `เรียนฝ่ายบุคคล (HR),\n\nคำขอลา${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} ได้ถูก${statusText}โดยผู้บริหาร (CEO) แล้ว\nหมายเหตุ: ${comment || '-'}\n\nคุณสามารถตรวจสอบรายละเอียดได้ในระบบ`,
+                `เรียนฝ่ายบุคคล (HR),\n\nคำขอ${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} ได้ถูก${statusText}โดยผู้บริหาร (CEO) แล้ว\nหมายเหตุ: ${comment || '-'}\n\nคุณสามารถตรวจสอบรายละเอียดได้ในระบบ`,
               );
             }
           }

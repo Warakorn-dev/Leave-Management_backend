@@ -25,12 +25,20 @@ import { AuditLogInterceptor } from './common/interceptors/audit-log.interceptor
       isGlobal: true,
       load: [configuration],
     }),
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000,
-        limit: 100,
-      },
-    ]),
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          ttl: 60000,
+          limit: 100,
+        },
+      ],
+      // Browser e2e tests (frontend/e2e) drive many pages from one IP; they
+      // start a separate backend with DISABLE_RATE_LIMIT=true. Never honoured
+      // in production.
+      skipIf: () =>
+        process.env.NODE_ENV !== 'production' &&
+        process.env.DISABLE_RATE_LIMIT === 'true',
+    }),
     ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,

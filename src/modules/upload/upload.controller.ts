@@ -23,6 +23,39 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { CurrentUser as CurrentUserPayload } from '../auth/types/current-user.type';
 import * as fs from 'fs';
 
+/**
+ * The real type of an uploaded file, from its first bytes ("magic bytes").
+ * Returns null for anything that is not an accepted document/image type.
+ */
+export function detectFileType(buf: Buffer): string | null {
+  if (buf.length < 4) return null;
+  const [a, b, c, d] = buf;
+  if (a === 0x25 && b === 0x50 && c === 0x44 && d === 0x46)
+    return 'application/pdf'; // %PDF
+  if (a === 0xff && b === 0xd8 && c === 0xff) return 'image/jpeg';
+  if (a === 0x89 && b === 0x50 && c === 0x4e && d === 0x47) return 'image/png';
+  if (a === 0x50 && b === 0x4b && c === 0x03 && d === 0x04)
+    return 'application/zip'; // DOCX/XLSX containers
+  if (a === 0xd0 && b === 0xcf && c === 0x11 && d === 0xe0)
+    return 'application/msword'; // legacy DOC/XLS
+  return null;
+}
+
+/** File content from memory or disk storage; the temp file is removed after reading. */
+function readUploadedFile(file: Express.Multer.File): Buffer | null {
+  if (file.buffer) return file.buffer;
+  if (file.path && fs.existsSync(file.path)) {
+    const buf = fs.readFileSync(file.path);
+    try {
+      fs.unlinkSync(file.path);
+    } catch (error) {
+      console.warn('Failed to delete temp file:', error);
+    }
+    return buf;
+  }
+  return null;
+}
+
 @ApiTags('Upload Module')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
@@ -90,93 +123,35 @@ export class UploadController {
     }
 
     try {
-      // Delete existing attachments to prevent orphaned data
-      await this.prisma.leaveAttachment.deleteMany({
-        where: { leaveRequestId },
-      });
-
-      let base64Data = '';
-      let fileBuffer: Buffer | null = null;
-
-      if (file.buffer) {
-        // memoryStorage: file content is in buffer
-        fileBuffer = file.buffer;
-        base64Data = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
-      } else if (file.path && fs.existsSync(file.path)) {
-        // diskStorage: file content is on disk
-        fileBuffer = fs.readFileSync(file.path);
-        base64Data = `data:${file.mimetype};base64,${fileBuffer.toString('base64')}`;
-        // Clean up temp file after reading
-        try {
-          fs.unlinkSync(file.path);
-        } catch (error) {
-          console.warn('Failed to delete temp file:', error);
-        }
-      }
-
-      if (!base64Data || !fileBuffer) {
+      const fileBuffer = readUploadedFile(file);
+      if (!fileBuffer) {
         throw new BadRequestException(
           'ไม่สามารถอ่านไฟล์ได้ กรุณาลองใหม่อีกครั้ง',
         );
       }
 
-      // Security: Magic Bytes Check to prevent fake extensions
-      const isSafe = (() => {
-        if (fileBuffer.length < 4) return false;
-        // PDF: 25 50 44 46
-        if (
-          fileBuffer[0] === 0x25 &&
-          fileBuffer[1] === 0x50 &&
-          fileBuffer[2] === 0x44 &&
-          fileBuffer[3] === 0x46
-        )
-          return true;
-        // JPEG: FF D8 FF
-        if (
-          fileBuffer[0] === 0xff &&
-          fileBuffer[1] === 0xd8 &&
-          fileBuffer[2] === 0xff
-        )
-          return true;
-        // PNG: 89 50 4E 47
-        if (
-          fileBuffer[0] === 0x89 &&
-          fileBuffer[1] === 0x50 &&
-          fileBuffer[2] === 0x4e &&
-          fileBuffer[3] === 0x47
-        )
-          return true;
-        // ZIP/DOCX: 50 4B 03 04
-        if (
-          fileBuffer[0] === 0x50 &&
-          fileBuffer[1] === 0x4b &&
-          fileBuffer[2] === 0x03 &&
-          fileBuffer[3] === 0x04
-        )
-          return true;
-        // DOC: D0 CF 11 E0
-        if (
-          fileBuffer[0] === 0xd0 &&
-          fileBuffer[1] === 0xcf &&
-          fileBuffer[2] === 0x11 &&
-          fileBuffer[3] === 0xe0
-        )
-          return true;
-        return false;
-      })();
-
-      if (!isSafe) {
+      // Security: the type comes from the file's magic bytes, never from the
+      // client's Content-Type (which is free text and could inject markup
+      // into the data URL the browsers later embed).
+      const detectedType = detectFileType(fileBuffer);
+      if (!detectedType) {
         throw new BadRequestException(
-          'ประเภทไฟล์ไม่ถูกต้องหรือไฟล์อาจแฝงอันตราย (Invalid Magic Bytes)',
+          'ประเภทไฟล์ไม่ถูกต้องหรือไฟล์อาจแฝงอันตราย',
         );
       }
+      const base64Data = `data:${detectedType};base64,${fileBuffer.toString('base64')}`;
 
-      const attachment = await this.prisma.leaveAttachment.create({
-        data: {
-          leaveRequestId,
-          filePath: base64Data,
-          fileType: file.mimetype,
-        },
+      // Replace the old attachment only after the new file passed every check,
+      // and atomically: if saving the new one fails, the old one is kept.
+      const attachment = await this.prisma.$transaction(async (tx) => {
+        await tx.leaveAttachment.deleteMany({ where: { leaveRequestId } });
+        return tx.leaveAttachment.create({
+          data: {
+            leaveRequestId,
+            filePath: base64Data,
+            fileType: detectedType,
+          },
+        });
       });
 
       return {
@@ -211,7 +186,7 @@ export class UploadController {
         );
       }
       throw new BadRequestException(
-        `เกิดข้อผิดพลาดในการอัปโหลดไฟล์: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'เกิดข้อผิดพลาดในการอัปโหลดไฟล์ กรุณาลองใหม่อีกครั้ง',
       );
     }
   }
@@ -239,54 +214,24 @@ export class UploadController {
       throw new BadRequestException('File is required');
     }
 
-    let avatarUrl = '';
-    let fileBuffer: Buffer | null = null;
-
-    if (file.buffer) {
-      fileBuffer = file.buffer;
-      avatarUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
-    } else if (file.path && fs.existsSync(file.path)) {
-      fileBuffer = fs.readFileSync(file.path);
-      avatarUrl = `data:${file.mimetype};base64,${fileBuffer.toString('base64')}`;
-      try {
-        fs.unlinkSync(file.path);
-      } catch (error) {
-        console.warn('Failed to delete temp file:', error);
-      }
-    }
-
+    const fileBuffer = readUploadedFile(file);
     if (!fileBuffer) {
       throw new BadRequestException('ไม่สามารถอ่านไฟล์ภาพได้');
     }
 
-    const isSafe = (() => {
-      if (fileBuffer.length < 4) return false;
-      if (
-        fileBuffer[0] === 0xff &&
-        fileBuffer[1] === 0xd8 &&
-        fileBuffer[2] === 0xff
-      )
-        return true; // JPEG
-      if (
-        fileBuffer[0] === 0x89 &&
-        fileBuffer[1] === 0x50 &&
-        fileBuffer[2] === 0x4e &&
-        fileBuffer[3] === 0x47
-      )
-        return true; // PNG
-      return false;
-    })();
-
-    if (!isSafe) {
+    // Type from the magic bytes only (never the client's Content-Type).
+    const detectedType = detectFileType(fileBuffer);
+    if (detectedType !== 'image/jpeg' && detectedType !== 'image/png') {
       throw new BadRequestException(
-        'รูปภาพโปรไฟล์ต้องเป็นไฟล์ JPEG หรือ PNG เท่านั้น (Invalid Magic Bytes)',
+        'รูปภาพโปรไฟล์ต้องเป็นไฟล์ JPEG หรือ PNG เท่านั้น',
       );
     }
+    const avatarUrl = `data:${detectedType};base64,${fileBuffer.toString('base64')}`;
 
     try {
       await this.prisma.user.update({
         where: { id: user.id },
-        data: { avatarUrl: avatarUrl || `/${file.path.replace(/\\/g, '/')}` },
+        data: { avatarUrl },
       });
     } catch (error) {
       console.error('Avatar upload error:', error);
@@ -298,7 +243,7 @@ export class UploadController {
         err.message?.includes('packet')
       ) {
         throw new PayloadTooLargeException(
-          'ขนาดไฟล์รูปภาพใหญ่เกินกว่าที่ฐานข้อมูลจะรองรับได้ (แนะนำขนาดไม่เกิน 2MB)',
+          'ขนาดไฟล์รูปภาพใหญ่เกินกว่าที่ฐานข้อมูลจะรองรับได้ (แนะนำขนาดไม่เกิน 2 MB)',
         );
       }
       throw new BadRequestException(

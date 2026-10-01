@@ -37,7 +37,9 @@ import type { CurrentUser as CurrentUserPayload } from '../auth/types/current-us
 @ApiTags('HR Module')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('HR', 'CEO')
+// Business rule (2026-09-24): HR only. The CEO may READ the three lists its own
+// pages use (leaves, employees, departments) — see the method-level @Roles below.
+@Roles('HR')
 @Controller('hr')
 export class HrController {
   constructor(
@@ -85,6 +87,7 @@ export class HrController {
   }
 
   @Get('departments')
+  @Roles('HR', 'CEO') // CEO read-only: dashboard / report
   @ApiOperation({ summary: 'Get all departments' })
   findAllDepartments() {
     return this.hrOrgService.findAllDepartments();
@@ -167,6 +170,7 @@ export class HrController {
   }
 
   @Get('employees')
+  @Roles('HR', 'CEO') // CEO read-only: dashboard / report
   @ApiOperation({ summary: 'Get all employees' })
   findAllEmployees() {
     return this.hrEmployeeService.findAllEmployees();
@@ -217,6 +221,7 @@ export class HrController {
 
   // --- Leaves ---
   @Get('leaves')
+  @Roles('HR', 'CEO') // CEO read-only: calendar / dashboard / report
   @ApiOperation({ summary: 'Get all leave requests across the company' })
   findAllLeaves() {
     return this.hrDashboardService.findAllLeaves();

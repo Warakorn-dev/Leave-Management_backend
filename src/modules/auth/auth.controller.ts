@@ -7,7 +7,6 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
-  Headers,
   Query,
   Req,
   UnauthorizedException,
@@ -45,6 +44,16 @@ export class AuthController {
     @Body() updateDto: UpdateProfileDto,
   ) {
     return this.authService.updateProfile(user.id, updateDto);
+  }
+
+  @Get('password-status')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Whether changing the password requires the current password',
+  })
+  getPasswordStatus(@CurrentUser() user: CurrentUserPayload) {
+    return this.authService.getPasswordStatus(user.id);
   }
 
   @Get('config')
@@ -103,17 +112,10 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request password reset email' })
-  forgotPassword(
-    @Body() forgotPasswordDto: ForgotPasswordDto,
-    @Headers('origin') origin: string,
-    @Headers('referer') referer: string,
-  ) {
-    let baseUrl = origin || 'http://localhost:3000';
-    if (!origin && referer) {
-      const url = new URL(referer);
-      baseUrl = `${url.protocol}//${url.host}`;
-    }
-    return this.authService.forgotPassword(forgotPasswordDto.username, baseUrl);
+  forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    // The link's site comes from server config (FRONTEND_URL), never from the
+    // request's Origin/Referer headers, which a caller can forge.
+    return this.authService.forgotPassword(forgotPasswordDto.username);
   }
 
   @Post('reset-password')

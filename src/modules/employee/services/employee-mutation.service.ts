@@ -136,7 +136,7 @@ export class EmployeeMutationService {
       if (employee.gender === 'Female') {
         if (calculatedDays > 135)
           throw new BadRequestException(
-            'สิทธิลาเพื่อคลอดบุตร สำหรับพนักงานหญิง ไม่เกิน 120 วัน (และลาเพิ่มได้อีก 15 วันหากมีใบรับรองแพทย์)',
+            'สิทธิ์ลาเพื่อคลอดบุตร สำหรับพนักงานหญิง ไม่เกิน 120 วัน (และลาเพิ่มได้อีก 15 วันหากมีใบรับรองแพทย์)',
           );
 
         let extraPaid = 0;
@@ -148,13 +148,13 @@ export class EmployeeMutationService {
       } else if (employee.gender === 'Male') {
         if (calculatedDays > 15)
           throw new BadRequestException(
-            'สิทธิลาเพื่อช่วยเหลือภริยาคลอดบุตร สำหรับพนักงานชาย ไม่เกิน 15 วัน',
+            'สิทธิ์ลาเพื่อช่วยเหลือภริยาคลอดบุตร สำหรับพนักงานชาย ไม่เกิน 15 วัน',
           );
         paidDays = calculatedDays;
         unpaidDays = 0;
       } else if (throwOnUnspecifiedMaternityGender) {
         throw new BadRequestException(
-          'ไม่ระบุเพศพนักงาน ไม่สามารถใช้สิทธิลาคลอดได้ โปรดติดต่อ HR',
+          'ไม่ระบุเพศพนักงาน ไม่สามารถใช้สิทธิ์ลาคลอดได้ โปรดติดต่อ HR',
         );
       }
     }
@@ -171,7 +171,7 @@ export class EmployeeMutationService {
         new Date().getTime() - new Date(employee.hireDate).getTime();
       if (workDurationMs < msInYear) {
         throw new BadRequestException(
-          'คุณต้องมีอายุงานครบ 1 ปี จึงจะสามารถใช้สิทธิลาพักผ่อนประจำปีได้',
+          'คุณต้องมีอายุงานครบ 1 ปี จึงจะสามารถใช้สิทธิ์ลาพักผ่อนประจำปีได้',
         );
       }
       paidDays = calculatedDays;
@@ -191,6 +191,12 @@ export class EmployeeMutationService {
 
   async createLeaveRequest(userId: string, dto: CreateLeaveRequestDto) {
     const employee = await this.getEmployeeByUserId(userId);
+
+    // Business rule: the CEO does not file leave; they only give final approval
+    // to managers' requests. The CEO keeps the /leave class role for /me, /types, etc.
+    if (employee.user?.role?.name === 'CEO') {
+      throw new ForbiddenException('ผู้บริหาร (CEO) ไม่ต้องยื่นคำขอลาในระบบ');
+    }
 
     let startDate: Date;
     let endDate: Date;
@@ -289,7 +295,7 @@ export class EmployeeMutationService {
 
       if (diffDays < advanceNoticeDays) {
         throw new BadRequestException(
-          `ต้องยื่นล่วงหน้าอย่างน้อย ${advanceNoticeDays} วัน (Requires ${advanceNoticeDays} days advance notice)`,
+          `ต้องยื่นล่วงหน้าอย่างน้อย ${advanceNoticeDays} วัน`,
         );
       }
     }
@@ -302,7 +308,7 @@ export class EmployeeMutationService {
 
       if (diffDays < minTenureDays) {
         throw new BadRequestException(
-          `ต้องมีอายุงานอย่างน้อย ${minTenureDays} วัน (Requires at least ${minTenureDays} days of tenure)`,
+          `ต้องมีอายุงานอย่างน้อย ${minTenureDays} วัน`,
         );
       }
     }
@@ -379,7 +385,7 @@ export class EmployeeMutationService {
 
     if (effectiveRemainingDays < calculatedDays) {
       throw new BadRequestException(
-        `สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`,
+        `สิทธิ์วันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`,
       );
     }
 
@@ -590,8 +596,8 @@ export class EmployeeMutationService {
             await this.prisma.notification.create({
               data: {
                 userId: ceo.id,
-                title: 'มีคำขอลาจากผู้จัดการแผนก',
-                message: `ผู้จัดการแผนก "${employee.firstName} ${employee.lastName}" ได้ยื่นคำขอ ${leaveTypeName} (${durationText}) ${leaveTimeDetail}`,
+                title: 'มีคำขอลาจากหัวหน้าแผนก',
+                message: `หัวหน้าแผนก "${employee.firstName} ${employee.lastName}" ได้ยื่นคำขอ ${leaveTypeName} (${durationText}) ${leaveTimeDetail}`,
                 type: 'NEW_ORDER',
                 redirectUrl: '/dashboard/ceo/approval',
               },
@@ -628,11 +634,12 @@ export class EmployeeMutationService {
       throw new NotFoundException('Leave request not found');
     }
 
+    // Business rule (2026-09-24): only the owner, HR or the CEO may edit a leave
+    // still waiting for HR. A department head may NOT edit a subordinate's leave.
     if (
       request.employeeId !== employee.id &&
       employee.user?.role?.name !== 'HR' &&
-      employee.user?.role?.name !== 'CEO' &&
-      employee.user?.role?.name !== 'MANAGER'
+      employee.user?.role?.name !== 'CEO'
     ) {
       throw new ForbiddenException(
         'You do not have permission to update this leave request',
@@ -645,6 +652,10 @@ export class EmployeeMutationService {
         'สามารถแก้ไขข้อมูลได้เฉพาะคำขอที่ยังไม่ผ่านการตรวจสอบจาก HR เท่านั้น',
       );
     }
+
+    // Balance, overlap, tenure and accrual belong to the leave's owner, not to
+    // whoever is editing it (HR/CEO may edit someone else's request).
+    const owner = request.employee;
 
     const dataToUpdate: Record<string, unknown> = { ...dto };
     if (request.status === 'REVIEWING_HR') {
@@ -723,7 +734,7 @@ export class EmployeeMutationService {
       const balance = await this.prisma.leaveBalance.findUnique({
         where: {
           employeeId_leaveTypeId_year: {
-            employeeId: employee.id,
+            employeeId: owner.id,
             leaveTypeId: request.leaveTypeId,
             year: currentYear,
           },
@@ -750,27 +761,27 @@ export class EmployeeMutationService {
 
         if (diffDays < advanceNoticeDays) {
           throw new BadRequestException(
-            `ต้องยื่นล่วงหน้าอย่างน้อย ${advanceNoticeDays} วัน (Requires ${advanceNoticeDays} days advance notice)`,
+            `ต้องยื่นล่วงหน้าอย่างน้อย ${advanceNoticeDays} วัน`,
           );
         }
       }
 
       const minTenureDays = balance.leaveType?.minTenureDays || 0;
       if (minTenureDays > 0) {
-        const joinDate = new Date(employee.hireDate);
+        const joinDate = new Date(owner.hireDate);
         const diffTime = newStartDate.getTime() - joinDate.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
         if (diffDays < minTenureDays) {
           throw new BadRequestException(
-            `ต้องมีอายุงานอย่างน้อย ${minTenureDays} วัน (Requires at least ${minTenureDays} days of tenure)`,
+            `ต้องมีอายุงานอย่างน้อย ${minTenureDays} วัน`,
           );
         }
       }
 
       const leaveTypeName = balance.leaveType.name;
       const isMaternityFemale =
-        leaveTypeName.includes('คลอดบุตร') && employee.gender === 'Female';
+        leaveTypeName.includes('คลอดบุตร') && owner.gender === 'Female';
       const isHourly =
         dto.leaveMode === 'hourly' ||
         (!dto.leaveMode && request.startFormat === 'hourly');
@@ -789,7 +800,7 @@ export class EmployeeMutationService {
       };
       const existingRequests = await this.prisma.leaveRequest.findMany({
         where: {
-          employeeId: employee.id,
+          employeeId: owner.id,
           id: { not: requestId },
           status: { notIn: BLOCKING_EXCLUDED_STATUSES },
         },
@@ -822,7 +833,7 @@ export class EmployeeMutationService {
 
       const pendingLeave = await this.prisma.leaveRequest.aggregate({
         where: {
-          employeeId: employee.id,
+          employeeId: owner.id,
           leaveTypeId: request.leaveTypeId,
           status: {
             in: [
@@ -842,12 +853,12 @@ export class EmployeeMutationService {
 
       if (effectiveRemainingDays < calculatedDays) {
         throw new BadRequestException(
-          `สิทธิวันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`,
+          `สิทธิ์วันลาไม่เพียงพอ (เหลือเพียง ${effectiveRemainingDays} วัน)`,
         );
       }
 
       const { paidDays, unpaidDays } = await this.computeAccrual({
-        employee,
+        employee: owner,
         leaveTypeId: request.leaveTypeId,
         leaveTypeName,
         calculatedDays,

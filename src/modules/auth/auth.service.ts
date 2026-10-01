@@ -17,6 +17,20 @@ import {
 import { NotificationService } from '../notification/notification.service';
 import type { StringValue } from 'ms';
 
+/** A real bcrypt hash of a random string, compared against for unknown users. */
+let dummyHashPromise: Promise<string> | null = null;
+function dummyPasswordHash(): Promise<string> {
+  dummyHashPromise ??= bcrypt.hash(`unused-${Math.random()}`, 10);
+  return dummyHashPromise;
+}
+
+const RESET_PURPOSE = 'password-reset';
+interface ResetTokenPayload {
+  sub: string;
+  purpose: string;
+  tokenVersion: number;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -149,33 +163,49 @@ export class AuthService {
       captchaCode: loginDto.captchaInput,
     });
 
+    // Security (2026-09-24): an unknown user, a wrong password and a locked
+    // account all get the SAME message, so nobody can probe which usernames
+    // exist or whose account is locked. The lockout policy is global (not
+    // per user), so stating it reveals nothing.
+    const [maxFailedSetting, lockoutDurationSetting] = await Promise.all([
+      this.prisma.adminSetting.findUnique({
+        where: { key: 'MAX_FAILED_LOGINS' },
+      }),
+      this.prisma.adminSetting.findUnique({
+        where: { key: 'LOCKOUT_DURATION_MINUTES' },
+      }),
+    ]);
+    const maxAttempts = maxFailedSetting?.value
+      ? parseInt(maxFailedSetting.value, 10)
+      : 5;
+    const lockoutMinutes = lockoutDurationSetting?.value
+      ? parseInt(lockoutDurationSetting.value, 10)
+      : 15;
+    const failed = () =>
+      new UnauthorizedException(
+        `ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (หากใส่รหัสผ่านผิดติดต่อกัน ${maxAttempts} ครั้ง ระบบจะระงับการเข้าสู่ระบบชั่วคราว ${lockoutMinutes} นาที)`,
+      );
+
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      // Spend the same bcrypt time as a real check, so response timing does
+      // not reveal that the username does not exist.
+      await bcrypt.compare(loginDto.password ?? '', await dummyPasswordHash());
+      throw failed();
     }
 
-    if (user.isActive === false) {
-      throw new UnauthorizedException('user ของคุณโดนระงับการใช้งานไปแล้ว');
-    }
-
-    // 1. ตรวจสอบว่าบัญชีถูกระงับชั่วคราวอยู่หรือไม่
+    // A locked account answers exactly like a wrong password, and the password
+    // is not even checked (no password oracle during the lockout).
     if (user.lockedUntil) {
-      // ถ้ายึดเวลาปัจจุบันแล้วยังไม่พ้นเวลาล็อค
       if (user.lockedUntil > new Date()) {
-        const remainingTime = Math.ceil(
-          (user.lockedUntil.getTime() - Date.now()) / 60000,
-        );
-        throw new UnauthorizedException(
-          `บัญชีถูกระงับชั่วคราวเนื่องจากใส่รหัสผ่านผิดเกินกำหนด กรุณาลองใหม่ในอีก ${remainingTime} นาที`,
-        );
-      } else {
-        // กรณีที่เลย 15 นาทีมาแล้ว (พ้นโทษแบน) ให้รีเซ็ตจำนวนครั้งกลับเป็น 0
-        await this.prisma.user.update({
-          where: { id: user.id },
-          data: { failedLoginAttempts: 0, lockedUntil: null },
-        });
-        user.failedLoginAttempts = 0;
-        user.lockedUntil = null;
+        throw failed();
       }
+      // Lockout over: start counting again from 0.
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      });
+      user.failedLoginAttempts = 0;
+      user.lockedUntil = null;
     }
 
     const isPasswordValid = await bcrypt.compare(
@@ -184,51 +214,23 @@ export class AuthService {
     );
 
     if (!isPasswordValid) {
-      // ดึงการตั้งค่าความปลอดภัยจาก Database (Admin Settings)
-      const [maxFailedSetting, lockoutDurationSetting] = await Promise.all([
-        this.prisma.adminSetting.findUnique({
-          where: { key: 'MAX_FAILED_LOGINS' },
-        }),
-        this.prisma.adminSetting.findUnique({
-          where: { key: 'LOCKOUT_DURATION_MINUTES' },
-        }),
-      ]);
-
-      const maxAttempts = maxFailedSetting?.value
-        ? parseInt(maxFailedSetting.value, 10)
-        : 5;
-      const lockoutMinutes = lockoutDurationSetting?.value
-        ? parseInt(lockoutDurationSetting.value, 10)
-        : 15;
-
       const newAttempts = (user.failedLoginAttempts || 0) + 1;
-      let lockedUntil: Date | null = null;
-
-      // ถ้าใส่ผิดครบตามจำนวนที่ตั้งไว้ ให้ระงับบัญชีตามเวลาที่ตั้งไว้
-      if (newAttempts >= maxAttempts) {
-        lockedUntil = new Date(Date.now() + lockoutMinutes * 60 * 1000);
-      }
-
-      // อัปเดตลง Database
+      const lockedUntil =
+        newAttempts >= maxAttempts
+          ? new Date(Date.now() + lockoutMinutes * 60 * 1000)
+          : null;
       await this.prisma.user.update({
         where: { id: user.id },
-        data: {
-          failedLoginAttempts: newAttempts,
-          lockedUntil,
-        },
+        data: { failedLoginAttempts: newAttempts, lockedUntil },
       });
+      throw failed();
+    }
 
-      // แจ้งเตือนผู้ใช้
-      if (lockedUntil) {
-        throw new UnauthorizedException(
-          `คุณใส่รหัสผ่านผิดเกิน ${maxAttempts} ครั้ง ระบบได้ทำการระงับบัญชีชั่วคราวเป็นเวลา ${lockoutMinutes} นาที`,
-        );
-      } else {
-        const remaining = maxAttempts - newAttempts;
-        throw new UnauthorizedException(
-          `ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (เหลือโอกาสอีก ${remaining} ครั้ง)`,
-        );
-      }
+    // Only someone who knows the password learns that the account is suspended.
+    if (user.isActive === false) {
+      throw new UnauthorizedException(
+        'บัญชีของคุณถูกระงับการใช้งาน กรุณาติดต่อฝ่ายบุคคล',
+      );
     }
 
     // ล็อกอินสำเร็จ -> รีเซ็ตกลับเป็น 0
@@ -307,8 +309,27 @@ export class AuthService {
     return tokens;
   }
 
-  // Simplified Forgot/Reset Password (usually involves email with JWT token)
-  async forgotPassword(username: string, baseUrl: string) {
+  /**
+   * Base URL for links in e-mails. Taken ONLY from server configuration —
+   * never from request headers (Origin/Referer), which a caller can forge to
+   * make the real reset e-mail point at their own site ("reset poisoning").
+   * FRONTEND_URL first, then the first CORS origin, then local development.
+   */
+  private frontendBaseUrl(): string {
+    const pick = (v?: string) =>
+      v
+        ?.split(',')
+        .map((s) => s.trim())
+        .find(Boolean);
+    const url =
+      pick(this.configService.get<string>('frontendUrl')) ??
+      pick(this.configService.get<string>('corsOrigins')) ??
+      'http://localhost:3000';
+    return url.replace(/\/+$/, '');
+  }
+
+  // Forgot/Reset Password: the reset link is e-mailed to the account's own address.
+  async forgotPassword(username: string) {
     const genericMessage =
       'หากบัญชีนี้มีอยู่ในระบบ ลิงก์สำหรับรีเซ็ตรหัสผ่านจะถูกส่งไปยังอีเมลของคุณ';
 
@@ -323,13 +344,19 @@ export class AuthService {
       return { message: genericMessage };
     }
 
-    // Generate reset token
-    const resetToken = this.jwtService.sign(
-      { sub: user.id },
-      { secret: this.configService.get('jwt.secret'), expiresIn: '15m' },
-    );
+    // Reset token: own signing key and purpose (never interchangeable with an
+    // access token), bound to the current tokenVersion so it works only once.
+    const payload: ResetTokenPayload = {
+      sub: user.id,
+      purpose: RESET_PURPOSE,
+      tokenVersion: user.tokenVersion,
+    };
+    const resetToken = this.jwtService.sign(payload, {
+      secret: this.resetTokenSecret(),
+      expiresIn: '15m',
+    });
 
-    const resetUrl = `${baseUrl}/reset-password?token=${resetToken}`;
+    const resetUrl = `${this.frontendBaseUrl()}/reset-password?token=${resetToken}`;
 
     // Send email via Notification Module
     await this.notificationService.sendEmail(
@@ -344,36 +371,122 @@ export class AuthService {
   }
 
   async resetPassword(resetDto: ResetPasswordDto) {
+    const invalid = new BadRequestException('Invalid or expired token');
+
+    let payload: ResetTokenPayload;
     try {
-      const payload = this.jwtService.verify<{ sub: string }>(resetDto.token, {
-        secret: this.configService.get('jwt.secret'),
+      payload = this.jwtService.verify<ResetTokenPayload>(resetDto.token, {
+        secret: this.resetTokenSecret(),
       });
-      const hashedPassword = await bcrypt.hash(resetDto.newPassword, 10);
-      await this.prisma.user.update({
-        where: { id: payload.sub },
-        data: {
-          passwordHash: hashedPassword,
-          refreshToken: null,
-          tokenVersion: { increment: 1 },
-        },
-      });
-      return { message: 'Password reset successfully' };
     } catch {
-      throw new BadRequestException('Invalid or expired token');
+      throw invalid;
     }
+    if (
+      payload.purpose !== RESET_PURPOSE ||
+      typeof payload.tokenVersion !== 'number'
+    ) {
+      throw invalid;
+    }
+
+    const hashedPassword = await bcrypt.hash(resetDto.newPassword, 10);
+    // Atomic single use: only matches while the version the link was issued
+    // for is still current; the increment then invalidates the link (and every
+    // session) at once, so a replay — even a concurrent one — updates nothing.
+    const result = await this.prisma.user.updateMany({
+      where: { id: payload.sub, tokenVersion: payload.tokenVersion },
+      data: {
+        passwordHash: hashedPassword,
+        passwordChangedAt: new Date(), // the user chose this password themselves
+        refreshToken: null,
+        tokenVersion: { increment: 1 },
+      },
+    });
+    if (result.count === 0) throw invalid;
+
+    return { message: 'Password reset successfully' };
+  }
+
+  private resetTokenSecret(): string {
+    return `${this.configService.get<string>('jwt.secret')}:${RESET_PURPOSE}`;
+  }
+
+  /**
+   * Business rule (2026-09-24): the first time a user changes their own
+   * password no current password is asked; after that it is required.
+   */
+  async getPasswordStatus(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { passwordChangedAt: true },
+    });
+    if (!user) throw new UnauthorizedException('User not found');
+    return { requiresCurrentPassword: user.passwordChangedAt !== null };
   }
 
   async updateProfile(userId: string, updateDto: UpdateProfileDto) {
-    if (updateDto.password) {
-      const passwordHash = await bcrypt.hash(updateDto.password, 10);
+    const newPassword = updateDto.newPassword ?? updateDto.password;
+
+    // Tokens for the caller's own session when the password changes (see below).
+    let sessionTokens: { accessToken: string; refreshToken: string } | null =
+      null;
+
+    // Check the password rule before writing anything, so a refused password
+    // change never half-applies the rest of the profile.
+    if (newPassword) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          passwordHash: true,
+          passwordChangedAt: true,
+          email: true,
+          tokenVersion: true,
+          role: { select: { name: true } },
+        },
+      });
+      if (!user) throw new UnauthorizedException('User not found');
+
+      if (user.passwordChangedAt !== null) {
+        if (!updateDto.currentPassword) {
+          throw new BadRequestException('กรุณากรอกรหัสผ่านปัจจุบัน');
+        }
+        const matches = await bcrypt.compare(
+          updateDto.currentPassword,
+          user.passwordHash,
+        );
+        if (!matches) {
+          throw new BadRequestException('รหัสผ่านปัจจุบันไม่ถูกต้อง');
+        }
+      }
+
+      // Business rule (2026-09-24): changing your own password signs out every
+      // OTHER device but keeps this one. Bumping tokenVersion invalidates all
+      // existing access tokens (JwtStrategy compares it) and replacing the
+      // stored refresh hash kills every other refresh token; the caller gets a
+      // fresh pair for the new version. Everything is written in one update.
+      const nextVersion = user.tokenVersion + 1;
+      sessionTokens = await this.getTokens(
+        userId,
+        user.email,
+        user.role.name,
+        nextVersion,
+      );
+      const [passwordHash, refreshHash] = await Promise.all([
+        bcrypt.hash(newPassword, 10),
+        bcrypt.hash(sessionTokens.refreshToken, 10),
+      ]);
       await this.prisma.user.update({
         where: { id: userId },
-        data: { passwordHash },
+        data: {
+          passwordHash,
+          passwordChangedAt: new Date(),
+          tokenVersion: nextVersion,
+          refreshToken: refreshHash,
+        },
       });
     }
 
-    if (updateDto.firstName || updateDto.lastName || updateDto.phone) {
-      // Find employee associated with this user
+    // Only the phone number is self-editable (names are changed by HR).
+    if (updateDto.phone) {
       const employee = await this.prisma.employee.findUnique({
         where: { userId },
       });
@@ -381,16 +494,17 @@ export class AuthService {
       if (employee) {
         await this.prisma.employee.update({
           where: { id: employee.id },
-          data: {
-            ...(updateDto.firstName && { firstName: updateDto.firstName }),
-            ...(updateDto.lastName && { lastName: updateDto.lastName }),
-            ...(updateDto.phone && { phone: updateDto.phone }),
-          },
+          data: { phone: updateDto.phone },
         });
       }
     }
 
-    return { success: true, message: 'Profile updated successfully' };
+    return {
+      success: true,
+      message: 'Profile updated successfully',
+      // Present only after a password change: the client must switch to these.
+      ...(sessionTokens ?? {}),
+    };
   }
 
   async getPublicConfig() {

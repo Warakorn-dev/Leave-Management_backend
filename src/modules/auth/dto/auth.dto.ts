@@ -52,21 +52,32 @@ export class ResetPasswordDto {
   newPassword: string;
 }
 
+// Every field is optional: a request may change only the password or only the phone.
+// Names are NOT editable here (business rule 2026-09-24): only HR changes an
+// employee's name. Sending firstName/lastName is rejected by the global
+// ValidationPipe (forbidNonWhitelisted).
 export class UpdateProfileDto {
-  @ApiProperty({ example: 'สมศักดิ์', required: false })
-  @IsString()
-  firstName?: string;
-
-  @ApiProperty({ example: 'พนักงานดีเด่น', required: false })
-  @IsString()
-  lastName?: string;
-
   @ApiProperty({ example: '0812345678', required: false })
+  @IsOptional()
   @IsString()
   phone?: string;
 
   @ApiProperty({ example: 'newPassword123', required: false })
+  @IsOptional()
   @IsString()
-  @MinLength(6)
+  @MinLength(6, { message: 'รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร' })
+  newPassword?: string;
+
+  /** Older name for newPassword, still accepted. */
+  @ApiProperty({ example: 'newPassword123', required: false })
+  @IsOptional()
+  @IsString()
+  @MinLength(6, { message: 'รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร' })
   password?: string;
+
+  /** Required once the user has changed their password before. */
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  currentPassword?: string;
 }

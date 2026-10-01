@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { BadRequestException, Module } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { UploadController } from './upload.controller';
@@ -28,14 +28,17 @@ import * as fs from 'fs';
       fileFilter: (req, file, cb) => {
         if (!file.originalname.match(/\.(pdf|png|jpeg|jpg)$/i)) {
           return cb(
-            new Error('ไม่รองรับประเภทไฟล์นี้ (รองรับเฉพาะ PDF, PNG, JPG)'),
+            // HttpException → 400 with this message (a plain Error would be a generic 500)
+            new BadRequestException(
+              'ไม่รองรับประเภทไฟล์นี้ (รองรับเฉพาะ PDF, PNG, JPG)',
+            ),
             false,
           );
         }
         cb(null, true);
       },
       limits: {
-        fileSize: 5 * 1024 * 1024, //
+        fileSize: 2 * 1024 * 1024, // 2 MB — keep in sync with MAX_UPLOAD_LABEL in http-exception.filter.ts and the frontend checks
       },
     }),
   ],

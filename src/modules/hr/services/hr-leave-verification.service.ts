@@ -1,6 +1,11 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationService } from '../../notification/notification.service';
+import {
+  isDepartmentApprover,
+  isLeaderPosition,
+  leaveHistoryUrlForRole,
+} from '../../notification/leave-history-url';
 
 /** HR's first-pass review of leave requests: pending queue, view-lock, approve/reject. */
 @Injectable()
@@ -9,6 +14,62 @@ export class HrLeaveVerificationService {
     private prisma: PrismaService,
     private notificationService: NotificationService,
   ) {}
+
+  /**
+   * Department heads who can act on PENDING_SUPERVISOR requests: users with
+   * role Manager, or HR users whose position is a leader/manager — the same
+   * people ManagerService lets through. The requester is never their own approver.
+   */
+  private async findDepartmentApprovers(
+    departmentId: string | null,
+    requesterEmployeeId: string,
+  ) {
+    // An employee without a department has no department head.
+    if (!departmentId) return [];
+    const include = {
+      user: { include: { role: true } },
+      position: true,
+    } as const;
+    const [managers, hrStaff] = await Promise.all([
+      this.prisma.employee.findMany({
+        where: { departmentId, user: { role: { name: 'Manager' } } },
+        include,
+      }),
+      this.prisma.employee.findMany({
+        where: { departmentId, user: { role: { name: 'HR' } } },
+        include,
+      }),
+    ]);
+    return [...managers, ...hrStaff].filter(
+      (e) =>
+        e.id !== requesterEmployeeId &&
+        isDepartmentApprover(e.user?.role?.name, e.position?.name),
+    );
+  }
+
+  /**
+   * No one can approve at department level: tell HR instead of letting the
+   * request sit in PENDING_SUPERVISOR unnoticed. The workflow itself is unchanged.
+   */
+  private async notifyMissingDepartmentApprover(request: {
+    employee: { firstName: string; lastName: string };
+    leaveType: { name: string };
+  }) {
+    const hrs = await this.prisma.user.findMany({
+      where: { role: { name: 'HR' } },
+    });
+    for (const hr of hrs) {
+      await this.prisma.notification.create({
+        data: {
+          userId: hr.id,
+          title: 'ไม่พบหัวหน้าแผนกที่อนุมัติคำขอลาได้',
+          message: `คำขอ${request.leaveType.name} ของ ${request.employee.firstName} ${request.employee.lastName} ผ่านการตรวจสอบแล้ว แต่แผนกนี้ยังไม่มีหัวหน้าแผนกที่อนุมัติได้ กรุณากำหนดหัวหน้าแผนก`,
+          type: 'SYSTEM',
+          redirectUrl: '/dashboard/hr/leave-history',
+        },
+      });
+    }
+  }
 
   async getPendingVerify(hrUserId: string) {
     const hrEmployee = await this.prisma.employee.findUnique({
@@ -284,12 +345,7 @@ export class HrLeaveVerificationService {
                   ? `คำขอยกเลิก${request.leaveType.name} ของคุณได้รับการอนุมัติและคืนโควตาแล้ว`
                   : `คำขอยกเลิก${request.leaveType.name} ของคุณถูกปฏิเสธ เหตุผล: ${dto.comment?.trim()}`,
                 type: approved ? 'APPROVE' : 'REJECT',
-                redirectUrl:
-                  employeeUser.role?.name === 'Manager'
-                    ? '/dashboard/manager/history'
-                    : employeeUser.role?.name === 'HR'
-                      ? '/dashboard/hr/leave-history'
-                      : '/dashboard/user/history',
+                redirectUrl: leaveHistoryUrlForRole(employeeUser.role?.name),
               },
             });
             if (employeeUser.email) {
@@ -314,10 +370,10 @@ export class HrLeaveVerificationService {
     } else {
       const roleName = request.employee.user?.role?.name || '';
       const posName = request.employee.position?.name || '';
+      // Department heads (role Manager/CEO, or a Leader position) go to the CEO.
       const isLeaderOrManager =
         ['Manager', 'CEO'].includes(roleName) ||
-        posName.toLowerCase().includes('leader') ||
-        posName.toLowerCase().includes('manager') ||
+        isLeaderPosition(posName) ||
         roleName.toLowerCase().includes('leader');
       const isManagerOrCEO = isLeaderOrManager;
       nextStatus = isManagerOrCEO ? 'PENDING_EXECUTIVE' : 'PENDING_SUPERVISOR';
@@ -361,14 +417,15 @@ export class HrLeaveVerificationService {
             action === 'Approve' &&
             nextStatus === 'PENDING_SUPERVISOR'
           ) {
-            // Notify managers
-            const managers = await this.prisma.employee.findMany({
-              where: {
-                departmentId: request.employee.departmentId,
-                user: { role: { name: 'Manager' } },
-              },
-              include: { user: true },
-            });
+            // Notify whoever can approve for this department: role Manager, or
+            // an HR department head (same access rule as ManagerService).
+            const managers = await this.findDepartmentApprovers(
+              request.employee.departmentId,
+              request.employee.id,
+            );
+            if (managers.length === 0) {
+              await this.notifyMissingDepartmentApprover(request);
+            }
             for (const m of managers) {
               if (m.user?.id) {
                 await this.prisma.notification.create({
@@ -416,6 +473,12 @@ export class HrLeaveVerificationService {
             }
           }
 
+          // The next approver depends on where the request was routed.
+          const nextApproverText =
+            nextStatus === 'PENDING_EXECUTIVE'
+              ? 'ผู้บริหาร (CEO)'
+              : 'หัวหน้าแผนก';
+
           if (employeeUser?.id) {
             await this.prisma.notification.create({
               data: {
@@ -427,9 +490,11 @@ export class HrLeaveVerificationService {
                 message:
                   action === 'Reject'
                     ? `เหตุผล: ${dto.comment || '-'}`
-                    : `คำขอลาของคุณกำลังรอการอนุมัติจากหัวหน้างาน`,
+                    : `คำขอลาของคุณกำลังรอการอนุมัติจาก${nextApproverText}`,
                 type: 'SYSTEM',
-                redirectUrl: '/dashboard/user/history',
+                redirectUrl: leaveHistoryUrlForRole(
+                  request.employee.user?.role?.name,
+                ),
               },
             });
           }
@@ -437,7 +502,7 @@ export class HrLeaveVerificationService {
             await this.notificationService.sendEmail(
               employeeUser.email,
               `[Leave Request] คำขอลาผ่านการตรวจสอบเบื้องต้นจาก HR`,
-              `เรียน ${request.employee.firstName},\n\nคำขอลา${request.leaveType.name} ของคุณ (วันที่ ${request.startDate.toLocaleDateString()} ถึง ${request.endDate.toLocaleDateString()}) ผ่านการตรวจสอบเบื้องต้นโดยฝ่ายบุคคล (HR) แล้ว\nขณะนี้กำลังรอการอนุมัติจากหัวหน้างาน/ผู้บริหารต่อไป\n\nคุณสามารถตรวจสอบสถานะได้ในระบบ`,
+              `เรียน ${request.employee.firstName},\n\nคำขอ${request.leaveType.name} ของคุณ (วันที่ ${request.startDate.toLocaleDateString()} ถึง ${request.endDate.toLocaleDateString()}) ผ่านการตรวจสอบเบื้องต้นโดยฝ่ายบุคคล (HR) แล้ว\nขณะนี้กำลังรอการอนุมัติจาก${nextApproverText}ต่อไป\n\nคุณสามารถตรวจสอบสถานะได้ในระบบ`,
             );
           }
         } catch (e) {
