@@ -18,7 +18,7 @@ function createPrisma() {
         .fn()
         .mockResolvedValue([{ id: 'u-1' }, { id: 'u-2' }, { id: 'u-3' }]),
     },
-    notification: { create: jest.fn() },
+    notification: { createMany: jest.fn() },
   };
 }
 let prisma: ReturnType<typeof createPrisma>;
@@ -52,17 +52,16 @@ describe('AnnouncementService', () => {
     expect(out).toEqual(
       expect.objectContaining({ id: 'a-1', title: 'ปิดปรับปรุงระบบ' }),
     );
-    expect(prisma.notification.create).toHaveBeenCalledTimes(3);
-    for (const id of ['u-1', 'u-2', 'u-3'])
-      expect(prisma.notification.create).toHaveBeenCalledWith({
-        data: {
-          userId: id,
-          title: 'ประกาศใหม่จาก HR',
-          message: 'ปิดปรับปรุงระบบ: คืนวันศุกร์',
-          type: 'SYSTEM',
-          redirectUrl: '/dashboard/user/page',
-        },
-      });
+    expect(prisma.notification.createMany).toHaveBeenCalledTimes(1);
+    expect(prisma.notification.createMany).toHaveBeenCalledWith({
+      data: ['u-1', 'u-2', 'u-3'].map((id) => ({
+        userId: id,
+        title: 'ประกาศใหม่จาก HR',
+        message: 'ปิดปรับปรุงระบบ: คืนวันศุกร์',
+        type: 'SYSTEM',
+        redirectUrl: '/dashboard/user/page',
+      })),
+    });
   });
 
   it('without a subtitle the notice carries only the title', async () => {
@@ -71,15 +70,17 @@ describe('AnnouncementService', () => {
       subtitle: '',
       isImportant: false,
     });
-    expect(prisma.notification.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ message: 'หยุดยาว' }) as unknown,
-      }),
-    );
+    expect(prisma.notification.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({ message: 'หยุดยาว' }),
+        expect.objectContaining({ message: 'หยุดยาว' }),
+        expect.objectContaining({ message: 'หยุดยาว' }),
+      ] as unknown,
+    });
   });
 
   it('a notification failure does not undo or fail the announcement', async () => {
-    prisma.notification.create.mockRejectedValue(new Error('db'));
+    prisma.notification.createMany.mockRejectedValue(new Error('db'));
     await expect(
       service.create({ title: 't', subtitle: '', isImportant: false }),
     ).resolves.toEqual(expect.objectContaining({ id: 'a-1' }));
@@ -90,7 +91,7 @@ describe('AnnouncementService', () => {
     await expect(
       service.create({ title: 't', subtitle: '', isImportant: false }),
     ).rejects.toThrow('db');
-    expect(prisma.notification.create).not.toHaveBeenCalled();
+    expect(prisma.notification.createMany).not.toHaveBeenCalled();
   });
 
   it('update and delete target the given id', async () => {
@@ -163,7 +164,7 @@ describe('Business rule — announcement attachments are at most 5 MB', () => {
       }),
     ).rejects.toThrow('ไฟล์แนบของประกาศต้องมีขนาดไม่เกิน 5 MB');
     expect(prisma.announcement.create).not.toHaveBeenCalled();
-    expect(prisma.notification.create).not.toHaveBeenCalled();
+    expect(prisma.notification.createMany).not.toHaveBeenCalled();
   });
 
   it('update with an oversized attachment is refused and nothing is written', async () => {
