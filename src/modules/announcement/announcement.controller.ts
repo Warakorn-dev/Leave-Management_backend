@@ -23,7 +23,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 @UseGuards(JwtAuthGuard)
 @Controller('announcement')
 export class AnnouncementController {
-  constructor(private readonly announcementService: AnnouncementService) {}
+  constructor(private readonly announcementService: AnnouncementService) { }
 
   @Get()
   async getAnnouncements(@Query('limit') limit?: string) {
@@ -40,6 +40,7 @@ export class AnnouncementController {
   @UseGuards(RolesGuard)
   @Roles('HR')
   async createAnnouncement(
+<<<<<<< HEAD
     @Body()
     body: {
       title: string;
@@ -48,6 +49,9 @@ export class AnnouncementController {
       attachmentData?: string | null;
       attachmentName?: string | null;
     },
+=======
+    @Body() body: { title: string; subtitle: string; isImportant: boolean; attachmentData?: string; attachmentName?: string },
+>>>>>>> 6b63c819549a341b8e13cfc0f36c44cad1926cea
   ) {
     try {
       const announcement = await this.announcementService.create(body);

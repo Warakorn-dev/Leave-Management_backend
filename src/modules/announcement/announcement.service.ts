@@ -70,6 +70,7 @@ export class AnnouncementService {
     return this.prisma.announcement.findMany(query);
   }
 
+<<<<<<< HEAD
   async create(
     data: AnnouncementInput & {
       title: string;
@@ -78,6 +79,15 @@ export class AnnouncementService {
     },
   ) {
     assertAttachmentSize(data);
+=======
+  async create(data: {
+    title: string;
+    subtitle: string;
+    isImportant: boolean;
+    attachmentData?: string;
+    attachmentName?: string;
+  }) {
+>>>>>>> 6b63c819549a341b8e13cfc0f36c44cad1926cea
     const item = await this.prisma.announcement.create({
       data,
     });
@@ -86,15 +96,16 @@ export class AnnouncementService {
       const allUsers = await this.prisma.user.findMany({
         select: { id: true },
       });
-      for (const u of allUsers) {
-        await this.prisma.notification.create({
-          data: {
+      
+      if (allUsers.length > 0) {
+        await this.prisma.notification.createMany({
+          data: allUsers.map(u => ({
             userId: u.id,
             title: 'ประกาศใหม่จาก HR',
             message: data.title + (data.subtitle ? `: ${data.subtitle}` : ''),
             type: 'SYSTEM',
             redirectUrl: '/dashboard/user/page',
-          },
+          }))
         });
       }
     } catch (err) {
