@@ -19,7 +19,9 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:smoke": "node scripts/api-smoke-test.js",
-    "test:api": "jest --config ./test/jest-api.json --runInBand"
+    "test:api": "jest --config ./test/jest-api.json --runInBand",
+    "db:init": "node scripts/init-production-db.js",
+    "db:seed:prod": "node prisma/seed-production.js"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

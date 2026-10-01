@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpExceptionFilter } from './utils/http-exception.filter';
 import { ResponseInterceptor } from './utils/response.interceptor';
+import { createOriginGuard, normalizeOrigin } from './utils/origin-guard';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
@@ -33,8 +34,15 @@ async function bootstrap() {
     configuredOrigins || 'http://localhost:3000,http://127.0.0.1:3000'
   )
     .split(',')
-    .map((origin) => origin.trim())
+    .map(normalizeOrigin)
     .filter(Boolean);
+
+  // Browsers reach this API only through the frontend's Next.js rewrite proxy,
+  // so the socket address is always the frontend server. Trusting that hop lets
+  // req.ip come from X-Forwarded-For, so rate limiting and audit logs see the
+  // real client instead of lumping every user under one IP. TRUST_PROXY is a
+  // comma-separated list of proxy IPs (e.g. the frontend server's private IP).
+  app.set('trust proxy', process.env.TRUST_PROXY || 'loopback');
 
   // Security
   app.use(
@@ -42,16 +50,11 @@ async function bootstrap() {
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );
-  app.enableCors({
-    credentials: true,
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-      callback(new Error('Origin is not allowed by CORS'));
-    },
-  });
+  // The origin guard is the gate (same-origin via the frontend proxy, or listed
+  // in CORS_ORIGINS; anything else gets a 403). Whatever passes it may have its
+  // Origin reflected in the CORS headers.
+  app.use(createOriginGuard(allowedOrigins));
+  app.enableCors({ credentials: true, origin: true });
 
   // Serve static files
   app.useStaticAssets(join(process.cwd(), 'uploads'), {
