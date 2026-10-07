@@ -350,12 +350,12 @@ describe('employee /leave', () => {
     expectStatus(other, 403);
   });
 
-  it('DELETE /leave/:id — a still-pending request cannot be cancelled (403)', async () => {
+  it('DELETE /leave/:id — a still-pending request can be cancelled (200)', async () => {
     const res = await call('delete', '/leave/:id', 'employee', {
       id: ids.editable,
     });
-    expectStatus(res, 403);
-    expect(await statusOf(ids.editable)).toBe('PENDING_VERIFY');
+    expectStatus(res, 200);
+    expect(await statusOf(ids.editable)).toBe('CANCELLED');
   });
 
   it('POST /upload/avatar', async () => {

@@ -27,7 +27,12 @@ export function roleForPosition(
   }
   const dept = (departmentName ?? '').toLowerCase();
   const pos = (positionName ?? '').toLowerCase();
-  if (pos.includes('ceo') || pos.includes('ผู้บริหาร') || pos.includes('president')) return 'CEO';
+  if (
+    pos.includes('ceo') ||
+    pos.includes('ผู้บริหาร') ||
+    pos.includes('president')
+  )
+    return 'CEO';
   if (dept.includes('hr') || dept.includes('human resource')) return 'HR';
   if (isLeaderPosition(pos)) return 'Manager';
   return 'Employee';

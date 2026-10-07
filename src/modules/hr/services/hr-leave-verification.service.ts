@@ -290,7 +290,25 @@ export class HrLeaveVerificationService {
         }
       }
 
-      const nextStatus = action === 'Approve' ? 'CANCELLED' : 'APPROVED';
+      let nextStatus = 'APPROVED';
+      if (action === 'Approve') {
+        nextStatus = 'CANCELLED';
+      } else {
+        // Find the latest valid approval to revert to
+        const latestApproval = await this.prisma.leaveApproval.findFirst({
+          where: {
+            leaveRequestId: requestId,
+            status: {
+              notIn: ['PENDING_CANCELLATION', 'CANCELLED', 'REJECTED'],
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (latestApproval) {
+          nextStatus = latestApproval.status;
+        }
+      }
+
       return this.prisma
         .$transaction(async (prisma) => {
           const updatedRequest = await prisma.leaveRequest.update({

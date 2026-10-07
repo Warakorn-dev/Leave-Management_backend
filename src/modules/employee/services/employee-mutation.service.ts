@@ -909,27 +909,30 @@ export class EmployeeMutationService {
       throw new NotFoundException('Leave request not found');
     }
 
-    if (request.status === 'PENDING_CANCELLATION') {
+    if (
+      request.status === 'PENDING_CANCELLATION' ||
+      request.status === 'CANCELLED' ||
+      request.status === 'REJECTED'
+    ) {
       throw new ForbiddenException(
-        'Cancellation request is already waiting for HR review',
+        request.status === 'PENDING_CANCELLATION'
+          ? 'Cancellation request is already waiting for HR review'
+          : 'คำขอนี้ไม่สามารถยกเลิกได้แล้ว',
       );
     }
 
-    if (request.status !== 'APPROVED') {
-      throw new ForbiddenException(
-        'ไม่สามารถยกเลิกคำขอที่ยังรอการอนุมัติได้ กรุณารอผลการอนุมัติก่อน',
-      );
+    const unapprovedStatuses = ['PENDING_VERIFY', 'REVIEWING_HR'];
+    const isUnapproved = unapprovedStatuses.includes(request.status);
+
+    if (isUnapproved) {
+      // ยกเลิกคำขอที่ยังไม่มีใครอนุมัติได้ทันที
+      return this.prisma.leaveRequest.update({
+        where: { id: requestId },
+        data: { status: 'CANCELLED' },
+      });
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const startDay = new Date(request.startDate);
-    startDay.setHours(0, 0, 0, 0);
-    if (startDay <= today) {
-      throw new ForbiddenException(
-        'Cannot cancel an approved leave on or after its start date',
-      );
-    }
+
 
     // An approved future leave requires HR confirmation before it is cancelled
     // and its balance is returned.

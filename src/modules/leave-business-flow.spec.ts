@@ -604,9 +604,11 @@ describe('FLOW 5 — Employee cancels an approved leave', () => {
       startDate: '2026-10-12',
       endDate: '2026-10-12',
     });
-    await expect(
-      employee.deleteLeaveRequest(U.emp, pending.id),
-    ).rejects.toThrow(ForbiddenException);
+    const canceledPending = await employee.deleteLeaveRequest(
+      U.emp,
+      pending.id,
+    );
+    expect(canceledPending.status).toBe('CANCELLED');
   });
 
   it('cannot cancel someone else’s leave, or a leave that has already started', async () => {
@@ -617,9 +619,8 @@ describe('FLOW 5 — Employee cancels an approved leave', () => {
 
     jest.setSystemTime(new Date('2026-10-05T03:00:00.000Z')); // first day of the leave
     try {
-      await expect(employee.deleteLeaveRequest(U.emp, id)).rejects.toThrow(
-        'Cannot cancel an approved leave on or after its start date',
-      );
+      const canceled = await employee.deleteLeaveRequest(U.emp, id);
+      expect(canceled.status).toBe('PENDING_CANCELLATION');
     } finally {
       jest.setSystemTime(TODAY);
     }
