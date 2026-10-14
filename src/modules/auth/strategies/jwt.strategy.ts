@@ -34,13 +34,13 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       include: { role: true },
     });
     if (!user) {
-      throw new UnauthorizedException('User not found');
+      throw new UnauthorizedException('ไม่พบผู้ใช้งาน');
     }
     if (user.isActive === false) {
       throw new UnauthorizedException('ACCOUNT_SUSPENDED');
     }
     if (payload.tokenVersion !== user.tokenVersion) {
-      throw new UnauthorizedException('Token is invalid or expired');
+      throw new UnauthorizedException('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
     }
     return { id: user.id, email: user.email, role: user.role.name };
   }

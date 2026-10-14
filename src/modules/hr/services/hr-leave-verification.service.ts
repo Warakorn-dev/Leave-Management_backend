@@ -147,7 +147,7 @@ export class HrLeaveVerificationService {
       include: { employee: true },
     });
     if (!request) {
-      throw new BadRequestException('Request not found');
+      throw new BadRequestException('ไม่พบคำขอลา');
     }
 
     if (request.employee.userId === hrUserId) {
@@ -162,7 +162,7 @@ export class HrLeaveVerificationService {
     }
     if (!['PENDING_VERIFY', 'REVIEWING_HR'].includes(request.status)) {
       throw new BadRequestException(
-        'This request is no longer waiting for HR review',
+        'คำขอนี้ไม่ได้อยู่ในสถานะรอฝ่ายบุคคลตรวจสอบแล้ว',
       );
     }
 
@@ -239,7 +239,9 @@ export class HrLeaveVerificationService {
         request.status,
       )
     ) {
-      throw new BadRequestException('Invalid request or already verified');
+      throw new BadRequestException(
+        'คำขอไม่ถูกต้อง หรือได้รับการตรวจสอบไปแล้ว',
+      );
     }
 
     if (request.employee.userId === hrUserId) {
@@ -254,7 +256,7 @@ export class HrLeaveVerificationService {
     }
 
     if (action === 'Reject' && !dto.comment?.trim()) {
-      throw new BadRequestException('A rejection reason is required');
+      throw new BadRequestException('กรุณาระบุเหตุผลที่ไม่อนุมัติ');
     }
 
     // The normal UI acquires the lock when an HR user opens the request.  Keep
@@ -285,12 +287,36 @@ export class HrLeaveVerificationService {
         startDay.setHours(0, 0, 0, 0);
         if (startDay <= today) {
           throw new BadRequestException(
-            'Cannot cancel an approved leave on or after its start date',
+            'ไม่สามารถยกเลิกใบลาที่ถึงวันเริ่มลาแล้ว',
           );
         }
       }
 
-      const nextStatus = action === 'Approve' ? 'CANCELLED' : 'APPROVED';
+      // The status the leave had before the employee asked to cancel it.
+      const latestApproval = await this.prisma.leaveApproval.findFirst({
+        where: {
+          leaveRequestId: requestId,
+          status: {
+            notIn: ['PENDING_CANCELLATION', 'CANCELLED', 'REJECTED'],
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      // Balance is deducted only when a leave becomes APPROVED, so only a
+      // cancelled APPROVED leave gives days back (D-01: a leave cancelled
+      // while still waiting for the department head or the CEO was never
+      // deducted and must not be refunded).
+      const wasApproved =
+        (latestApproval?.status ?? '').toUpperCase() === 'APPROVED';
+
+      let nextStatus = 'APPROVED';
+      if (action === 'Approve') {
+        nextStatus = 'CANCELLED';
+      } else if (latestApproval) {
+        // Reject the cancellation: back to where the leave was.
+        nextStatus = latestApproval.status;
+      }
+
       return this.prisma
         .$transaction(async (prisma) => {
           const updatedRequest = await prisma.leaveRequest.update({
@@ -307,7 +333,7 @@ export class HrLeaveVerificationService {
             },
           });
 
-          if (action === 'Approve') {
+          if (action === 'Approve' && wasApproved) {
             const balance = await prisma.leaveBalance.findFirst({
               where: {
                 employeeId: request.employeeId,
@@ -342,7 +368,7 @@ export class HrLeaveVerificationService {
                   ? 'คำขอยกเลิกใบลาได้รับการอนุมัติ'
                   : 'คำขอยกเลิกใบลาถูกปฏิเสธ',
                 message: approved
-                  ? `คำขอยกเลิก${request.leaveType.name} ของคุณได้รับการอนุมัติและคืนโควตาแล้ว`
+                  ? `คำขอยกเลิก${request.leaveType.name} ของคุณได้รับการอนุมัติ${wasApproved ? 'และคืนโควตาแล้ว' : 'แล้ว'}`
                   : `คำขอยกเลิก${request.leaveType.name} ของคุณถูกปฏิเสธ เหตุผล: ${dto.comment?.trim()}`,
                 type: approved ? 'APPROVE' : 'REJECT',
                 redirectUrl: leaveHistoryUrlForRole(employeeUser.role?.name),
@@ -355,7 +381,7 @@ export class HrLeaveVerificationService {
                   ? '[Leave Cancellation] อนุมัติแล้ว'
                   : '[Leave Cancellation] ไม่อนุมัติ',
                 approved
-                  ? `คำขอยกเลิก${request.leaveType.name} ของคุณได้รับการอนุมัติและคืนโควตาแล้ว`
+                  ? `คำขอยกเลิก${request.leaveType.name} ของคุณได้รับการอนุมัติ${wasApproved ? 'และคืนโควตาแล้ว' : 'แล้ว'}`
                   : `คำขอยกเลิก${request.leaveType.name} ของคุณถูกปฏิเสธ\nเหตุผล: ${dto.comment?.trim()}`,
               );
             }

@@ -103,7 +103,9 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh JWT tokens using refresh token' })
   refreshTokens(@CurrentUser() user: RefreshTokenUser) {
     if (!user.refreshToken) {
-      throw new UnauthorizedException('Refresh token is missing');
+      throw new UnauthorizedException(
+        'ไม่พบข้อมูลการเข้าสู่ระบบ กรุณาเข้าสู่ระบบใหม่',
+      );
     }
     return this.authService.refreshTokens(user.id, user.refreshToken);
   }

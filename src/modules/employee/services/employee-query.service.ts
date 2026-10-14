@@ -64,7 +64,7 @@ export class EmployeeQueryService {
       where: { userId },
       include: { user: { include: { role: true } } },
     });
-    if (!employee) throw new NotFoundException('Employee profile not found');
+    if (!employee) throw new NotFoundException('ไม่พบข้อมูลพนักงาน');
     return employee;
   }
 
@@ -89,7 +89,7 @@ export class EmployeeQueryService {
         where: { id: userId },
         include: { role: true },
       });
-      if (!user) throw new NotFoundException('User not found');
+      if (!user) throw new NotFoundException('ไม่พบผู้ใช้งาน');
       return user;
     }
 
@@ -148,7 +148,7 @@ export class EmployeeQueryService {
       });
       return {
         success: true,
-        message: 'Avatar updated successfully',
+        message: 'อัปเดตรูปโปรไฟล์เรียบร้อยแล้ว',
         avatarUrl: user.avatarUrl,
       };
     } catch (error) {

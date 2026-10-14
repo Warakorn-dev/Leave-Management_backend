@@ -183,7 +183,7 @@ export class AuthService {
       : 15;
     const failed = () =>
       new UnauthorizedException(
-        `ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (หากใส่รหัสผ่านผิดติดต่อกัน ${maxAttempts} ครั้ง ระบบจะระงับการเข้าสู่ระบบชั่วคราว ${lockoutMinutes} นาที)`,
+        `ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (หากใส่รหัสผ่านผิด ${maxAttempts} ครั้งภายใน ${lockoutMinutes} นาที ระบบจะระงับการเข้าสู่ระบบชั่วคราว ${lockoutMinutes} นาที)`,
       );
 
     if (!user) {
@@ -202,10 +202,15 @@ export class AuthService {
       // Lockout over: start counting again from 0.
       await this.prisma.user.update({
         where: { id: user.id },
-        data: { failedLoginAttempts: 0, lockedUntil: null },
+        data: {
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          lastFailedLoginAt: null,
+        },
       });
       user.failedLoginAttempts = 0;
       user.lockedUntil = null;
+      user.lastFailedLoginAt = null;
     }
 
     const isPasswordValid = await bcrypt.compare(
@@ -214,14 +219,25 @@ export class AuthService {
     );
 
     if (!isPasswordValid) {
-      const newAttempts = (user.failedLoginAttempts || 0) + 1;
+      // D-08 (2026-10-14): wrong passwords count toward the lockout only when
+      // they come within `lockoutMinutes` of the previous one; after a longer
+      // pause the count starts again at 1.
+      const now = new Date();
+      const windowMs = lockoutMinutes * 60 * 1000;
+      const withinWindow =
+        !!user.lastFailedLoginAt &&
+        now.getTime() - new Date(user.lastFailedLoginAt).getTime() <= windowMs;
+      const newAttempts =
+        (withinWindow ? user.failedLoginAttempts || 0 : 0) + 1;
       const lockedUntil =
-        newAttempts >= maxAttempts
-          ? new Date(Date.now() + lockoutMinutes * 60 * 1000)
-          : null;
+        newAttempts >= maxAttempts ? new Date(now.getTime() + windowMs) : null;
       await this.prisma.user.update({
         where: { id: user.id },
-        data: { failedLoginAttempts: newAttempts, lockedUntil },
+        data: {
+          failedLoginAttempts: newAttempts,
+          lockedUntil,
+          lastFailedLoginAt: now,
+        },
       });
       throw failed();
     }
@@ -239,6 +255,7 @@ export class AuthService {
       data: {
         failedLoginAttempts: 0,
         lockedUntil: null,
+        lastFailedLoginAt: null,
         lastLoginAt: new Date(),
         lastLoginIp: ip,
       },
@@ -273,7 +290,7 @@ export class AuthService {
       where: { id: userId },
       data: { refreshToken: null, tokenVersion: { increment: 1 } },
     });
-    return { message: 'Logged out successfully' };
+    return { message: 'ออกจากระบบเรียบร้อยแล้ว' };
   }
 
   async refreshTokens(userId: string, refreshToken: string) {
@@ -283,7 +300,7 @@ export class AuthService {
     });
 
     if (!user || !user.refreshToken) {
-      throw new UnauthorizedException('Access Denied');
+      throw new UnauthorizedException('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
     }
 
     if (user.isActive === false) {
@@ -295,7 +312,7 @@ export class AuthService {
       user.refreshToken,
     );
     if (!refreshTokenMatches) {
-      throw new UnauthorizedException('Access Denied');
+      throw new UnauthorizedException('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
     }
 
     const tokens = await this.getTokens(
@@ -361,9 +378,9 @@ export class AuthService {
     // Send email via Notification Module
     await this.notificationService.sendEmail(
       user.email,
-      'Reset Your Password - Leave Management System',
-      `Please click the following link to reset your password: ${resetUrl}`,
-      `<p>Hello ${user.username},</p><p>Please click the link below to reset your password:</p><p><a href="${resetUrl}">Reset Password</a></p><p>If you didn't request this, you can ignore this email.</p>`,
+      'รีเซ็ตรหัสผ่าน - ระบบจัดการการลา',
+      `กรุณาคลิกลิงก์ต่อไปนี้เพื่อตั้งรหัสผ่านใหม่: ${resetUrl}`,
+      `<p>เรียน ${user.username},</p><p>กรุณาคลิกลิงก์ด้านล่างเพื่อตั้งรหัสผ่านใหม่:</p><p><a href="${resetUrl}">ตั้งรหัสผ่านใหม่</a></p><p>หากคุณไม่ได้เป็นผู้ขอรีเซ็ตรหัสผ่าน สามารถเพิกเฉยต่ออีเมลฉบับนี้ได้</p>`,
     );
 
     // Prevent Token Leakage (do not return token)
@@ -371,7 +388,9 @@ export class AuthService {
   }
 
   async resetPassword(resetDto: ResetPasswordDto) {
-    const invalid = new BadRequestException('Invalid or expired token');
+    const invalid = new BadRequestException(
+      'ลิงก์รีเซ็ตรหัสผ่านไม่ถูกต้องหรือหมดอายุแล้ว',
+    );
 
     let payload: ResetTokenPayload;
     try {
@@ -403,7 +422,7 @@ export class AuthService {
     });
     if (result.count === 0) throw invalid;
 
-    return { message: 'Password reset successfully' };
+    return { message: 'รีเซ็ตรหัสผ่านเรียบร้อยแล้ว' };
   }
 
   private resetTokenSecret(): string {
@@ -419,7 +438,7 @@ export class AuthService {
       where: { id: userId },
       select: { passwordChangedAt: true },
     });
-    if (!user) throw new UnauthorizedException('User not found');
+    if (!user) throw new UnauthorizedException('ไม่พบผู้ใช้งาน');
     return { requiresCurrentPassword: user.passwordChangedAt !== null };
   }
 
@@ -443,7 +462,7 @@ export class AuthService {
           role: { select: { name: true } },
         },
       });
-      if (!user) throw new UnauthorizedException('User not found');
+      if (!user) throw new UnauthorizedException('ไม่พบผู้ใช้งาน');
 
       if (user.passwordChangedAt !== null) {
         if (!updateDto.currentPassword) {
@@ -501,7 +520,7 @@ export class AuthService {
 
     return {
       success: true,
-      message: 'Profile updated successfully',
+      message: 'บันทึกข้อมูลส่วนตัวเรียบร้อยแล้ว',
       // Present only after a password change: the client must switch to these.
       ...(sessionTokens ?? {}),
     };

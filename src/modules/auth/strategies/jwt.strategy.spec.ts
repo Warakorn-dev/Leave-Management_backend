@@ -53,7 +53,7 @@ describe('JwtStrategy (every protected request)', () => {
   });
 
   it.each([
-    ['deleted user', null, 'User not found'],
+    ['deleted user', null, 'ไม่พบผู้ใช้งาน'],
     ['suspended user', { ...activeUser, isActive: false }, 'ACCOUNT_SUSPENDED'],
   ])('%s is refused', async (_n, user, message) => {
     const s = new JwtStrategy(
@@ -75,7 +75,7 @@ describe('JwtStrategy (every protected request)', () => {
     );
     await expect(
       s.validate({ sub: 'u-1', tokenVersion } as never),
-    ).rejects.toThrow('Token is invalid or expired');
+    ).rejects.toThrow('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
   });
 });
 
@@ -101,6 +101,6 @@ describe('JwtRefreshStrategy', () => {
     );
     await expect(
       s.validate({ get: () => 'Bearer x' } as never, { sub: 'u-x' }),
-    ).rejects.toThrow('User not found');
+    ).rejects.toThrow('ไม่พบผู้ใช้งาน');
   });
 });

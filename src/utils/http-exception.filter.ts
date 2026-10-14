@@ -159,7 +159,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     response.status(status).json({
       success: false,
-      message: typeof message === 'string' ? message : 'An error occurred',
+      message: typeof message === 'string' ? message : 'เกิดข้อผิดพลาด',
       errors,
     });
   }

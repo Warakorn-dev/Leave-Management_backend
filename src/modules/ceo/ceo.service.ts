@@ -316,7 +316,9 @@ export class CeoService {
     });
 
     if (!request || request.status !== 'PENDING_EXECUTIVE') {
-      throw new BadRequestException('Request is not waiting for CEO approval');
+      throw new BadRequestException(
+        'คำขอนี้ไม่ได้อยู่ในสถานะรอผู้บริหารอนุมัติ',
+      );
     }
 
     // No approver above the CEO is defined yet; blocking self-approval is the
@@ -328,7 +330,7 @@ export class CeoService {
     }
 
     if (action === 'Reject' && !comment?.trim()) {
-      throw new BadRequestException('A rejection reason is required');
+      throw new BadRequestException('กรุณาระบุเหตุผลที่ไม่อนุมัติ');
     }
 
     const nextStatus = action === 'Approve' ? 'APPROVED' : 'REJECTED';
@@ -344,7 +346,7 @@ export class CeoService {
         });
         if (claimed.count === 0) {
           throw new BadRequestException(
-            'Request is not waiting for CEO approval',
+            'คำขอนี้ไม่ได้อยู่ในสถานะรอผู้บริหารอนุมัติ',
           );
         }
         const updated = await prisma.leaveRequest.findUniqueOrThrow({
@@ -409,7 +411,7 @@ export class CeoService {
               leaveBalance.remainingDays - request.totalDays;
 
             if (newRemainingDays < 0) {
-              throw new BadRequestException('Insufficient leave balance');
+              throw new BadRequestException('สิทธิ์วันลาคงเหลือไม่เพียงพอ');
             }
 
             const newUsedDays = leaveBalance.totalDays - newRemainingDays;

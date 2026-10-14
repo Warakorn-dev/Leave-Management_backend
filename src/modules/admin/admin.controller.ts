@@ -56,6 +56,14 @@ export class AdminController {
     return this.adminService.forceLogout(id);
   }
 
+  @Patch('users/:id/unlock')
+  @ApiOperation({
+    summary: 'Clear a login lockout (the user stays signed in)',
+  })
+  unlockUser(@Param('id') id: string) {
+    return this.adminService.unlockUser(id);
+  }
+
   @Patch('users/:id/toggle-status')
   @ApiOperation({ summary: 'Activate or deactivate a user account' })
   toggleStatus(

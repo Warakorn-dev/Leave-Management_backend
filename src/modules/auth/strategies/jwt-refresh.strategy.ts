@@ -36,7 +36,7 @@ export class JwtRefreshStrategy extends PassportStrategy(
     });
 
     if (!user) {
-      throw new UnauthorizedException('User not found');
+      throw new UnauthorizedException('ไม่พบผู้ใช้งาน');
     }
 
     return {

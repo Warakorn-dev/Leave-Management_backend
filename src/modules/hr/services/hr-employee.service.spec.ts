@@ -173,7 +173,7 @@ describe('HrEmployeeService.createEmployee', () => {
   it('duplicate e-mail is refused and nothing is created', async () => {
     prisma.user.findUnique.mockResolvedValue({ id: 'u-old' });
     await expect(service.createEmployee(base as never)).rejects.toThrow(
-      new BadRequestException('Email already in use'),
+      new BadRequestException('อีเมลนี้ถูกใช้งานแล้ว'),
     );
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(prisma.user.create).not.toHaveBeenCalled();
@@ -228,7 +228,7 @@ describe('HrEmployeeService.createEmployee', () => {
     prisma.position.findUnique.mockResolvedValue(null);
     prisma.role.findFirst.mockResolvedValue(null);
     await expect(service.createEmployee(base as never)).rejects.toThrow(
-      'No default role found',
+      'ไม่พบสิทธิ์เริ่มต้นในระบบ กรุณาติดต่อผู้ดูแลระบบ',
     );
     expect(prisma.user.create).not.toHaveBeenCalled();
   });

@@ -32,7 +32,7 @@ export class AnnouncementController {
       const data = await this.announcementService.findAll(parsedLimit);
       return { success: true, data };
     } catch {
-      return { success: false, message: 'Failed to fetch announcements' };
+      return { success: false, message: 'ไม่สามารถโหลดประกาศได้' };
     }
   }
 
@@ -54,7 +54,7 @@ export class AnnouncementController {
       return { success: true, data: announcement };
     } catch (e) {
       if (e instanceof HttpException) throw e; // e.g. attachment over 5 MB
-      return { success: false, message: 'Failed to create announcement' };
+      return { success: false, message: 'ไม่สามารถสร้างประกาศได้' };
     }
   }
 
@@ -77,7 +77,7 @@ export class AnnouncementController {
       return { success: true, data: announcement };
     } catch (e) {
       if (e instanceof HttpException) throw e; // e.g. attachment over 5 MB
-      return { success: false, message: 'Failed to update announcement' };
+      return { success: false, message: 'ไม่สามารถแก้ไขประกาศได้' };
     }
   }
 
@@ -87,9 +87,9 @@ export class AnnouncementController {
   async deleteAnnouncement(@Param('id') id: string) {
     try {
       await this.announcementService.delete(id);
-      return { success: true, message: 'Announcement deleted successfully' };
+      return { success: true, message: 'ลบประกาศเรียบร้อยแล้ว' };
     } catch {
-      return { success: false, message: 'Failed to delete announcement' };
+      return { success: false, message: 'ไม่สามารถลบประกาศได้' };
     }
   }
 }

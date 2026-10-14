@@ -94,7 +94,7 @@ export class HrOrgService {
   async updatePosition(id: string, dto: UpdatePositionDto) {
     return this.prisma.$transaction(async (prisma) => {
       const existingPos = await prisma.position.findUnique({ where: { id } });
-      if (!existingPos) throw new NotFoundException('Position not found');
+      if (!existingPos) throw new NotFoundException('ไม่พบตำแหน่งงาน');
       // A position's role cascades to everyone holding it, so this also
       // keeps HR from turning a group of employees into Admins.
       await assertHrAssignableRole(prisma, dto.roleId);

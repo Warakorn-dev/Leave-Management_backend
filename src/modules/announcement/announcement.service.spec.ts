@@ -113,7 +113,7 @@ describe('AnnouncementController (error envelope)', () => {
     const ctrl = new AnnouncementController(service);
     await expect(ctrl.deleteAnnouncement('missing')).resolves.toEqual({
       success: false,
-      message: 'Failed to delete announcement',
+      message: 'ไม่สามารถลบประกาศได้',
     });
   });
 

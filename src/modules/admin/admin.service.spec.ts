@@ -49,7 +49,7 @@ describe('AdminService account actions', () => {
     await expect(
       admin.toggleStatus('u-admin', 'u-1', { isActive: false }),
     ).resolves.toEqual({
-      message: 'User deactivated',
+      message: 'ระงับการใช้งานบัญชีเรียบร้อยแล้ว',
     });
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'u-1' },
@@ -65,8 +65,30 @@ describe('AdminService account actions', () => {
     await admin.toggleStatus('u-admin', 'u-1', { isActive: true });
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'u-1' },
-      data: { isActive: true, lockedUntil: null, failedLoginAttempts: 0 },
+      data: {
+        isActive: true,
+        lockedUntil: null,
+        failedLoginAttempts: 0,
+        lastFailedLoginAt: null,
+      },
     });
+  });
+
+  it('[D-07] unlock clears the lockout only — the user is NOT signed out', async () => {
+    await admin.unlockUser('u-1');
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u-1' },
+      data: {
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastFailedLoginAt: null,
+      },
+    });
+    const { data } = (prisma.user.update.mock.calls as unknown[][])[0][0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data).not.toHaveProperty('tokenVersion');
+    expect(data).not.toHaveProperty('refreshToken');
   });
 
   it('password reset stores only a hash of the temporary password and ends every session', async () => {
@@ -110,7 +132,7 @@ describe('AdminService account actions', () => {
     prisma.user.findUnique.mockResolvedValue(null);
     await expect(
       admin.updateRole('u-admin', 'ghost', { roleId: 'role-HR' }),
-    ).rejects.toThrow('User not found');
+    ).rejects.toThrow('ไม่พบผู้ใช้งาน');
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
 });

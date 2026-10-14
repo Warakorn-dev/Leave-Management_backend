@@ -445,9 +445,34 @@ export function createFakePrisma(
     },
     leaveApproval: {
       create: jest.fn(async ({ data }: { data: ApprovalRow }) => {
-        state.approvals.push({ ...data, comment: data.comment ?? null });
-        return { ...data };
+        const row = {
+          ...data,
+          comment: data.comment ?? null,
+          createdAt: new Date(),
+        };
+        state.approvals.push(row);
+        return { ...row };
       }),
+      findFirst: jest.fn(
+        async ({
+          where,
+          orderBy,
+        }: {
+          where?: Record<string, unknown>;
+          orderBy?: { createdAt: 'desc' | 'asc' };
+        }) => {
+          let rows = state.approvals;
+          if (where) {
+            rows = rows.filter((r) =>
+              matchWhere(r as unknown as Record<string, unknown>, where),
+            );
+          }
+          if (orderBy?.createdAt === 'desc') {
+            return rows.slice().reverse()[0] || null;
+          }
+          return rows[0] || null;
+        },
+      ),
     },
     leaveBalance: {
       findUnique: jest.fn(

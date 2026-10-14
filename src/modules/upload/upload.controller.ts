@@ -211,7 +211,7 @@ export class UploadController {
     @CurrentUser() user: CurrentUserPayload,
   ) {
     if (!file) {
-      throw new BadRequestException('File is required');
+      throw new BadRequestException('กรุณาเลือกไฟล์');
     }
 
     const fileBuffer = readUploadedFile(file);
@@ -252,7 +252,7 @@ export class UploadController {
     }
 
     return {
-      message: 'Avatar uploaded and saved to database successfully',
+      message: 'อัปโหลดรูปโปรไฟล์เรียบร้อยแล้ว',
       avatarUrl,
     };
   }

@@ -168,7 +168,23 @@ export class AdminService {
       where: { id: userId },
       data: { refreshToken: null, tokenVersion: { increment: 1 } },
     });
-    return { message: 'User forced logout successfully' };
+    return { message: 'บังคับออกจากระบบเรียบร้อยแล้ว' };
+  }
+
+  /**
+   * D-07 (2026-10-14): clears a login lockout only. Unlike reactivating the
+   * account, the user is NOT signed out anywhere.
+   */
+  async unlockUser(userId: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastFailedLoginAt: null,
+      },
+    });
+    return { message: 'ปลดล็อกบัญชีเรียบร้อยแล้ว' };
   }
 
   /**
@@ -181,7 +197,7 @@ export class AdminService {
       where: { id: userId },
       select: { isActive: true, role: { select: { name: true } } },
     });
-    if (!target) throw new NotFoundException('User not found');
+    if (!target) throw new NotFoundException('ไม่พบผู้ใช้งาน');
     if (target.role?.name !== ADMIN_ROLE || target.isActive === false) return;
     const activeAdmins = await this.prisma.user.count({
       where: { isActive: true, role: { name: ADMIN_ROLE } },
@@ -206,14 +222,22 @@ export class AdminService {
       where: { id: userId },
       data: {
         isActive: dto.isActive,
-        ...(dto.isActive ? { lockedUntil: null, failedLoginAttempts: 0 } : {}),
+        ...(dto.isActive
+          ? {
+              lockedUntil: null,
+              failedLoginAttempts: 0,
+              lastFailedLoginAt: null,
+            }
+          : {}),
         // If deactivating, also logout
         ...(dto.isActive === false
           ? { refreshToken: null, tokenVersion: { increment: 1 } }
           : {}),
       },
     });
-    return { message: `User ${dto.isActive ? 'activated' : 'deactivated'}` };
+    return {
+      message: `${dto.isActive ? 'เปิดการใช้งานบัญชีเรียบร้อยแล้ว' : 'ระงับการใช้งานบัญชีเรียบร้อยแล้ว'}`,
+    };
   }
 
   async resetPassword(userId: string) {
@@ -228,13 +252,14 @@ export class AdminService {
         tokenVersion: { increment: 1 },
         failedLoginAttempts: 0,
         lockedUntil: null,
+        lastFailedLoginAt: null,
       },
     });
 
     // In a real app, send an email here instead of returning it.
     // We return it for the admin to copy-paste.
     return {
-      message: 'Password reset successfully',
+      message: 'รีเซ็ตรหัสผ่านเรียบร้อยแล้ว',
       tempPassword,
     };
   }
@@ -247,9 +272,9 @@ export class AdminService {
       where: { id: userId },
       select: { roleId: true },
     });
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException('ไม่พบผู้ใช้งาน');
     if (user.roleId === dto.roleId) {
-      return { message: 'Role updated successfully' };
+      return { message: 'เปลี่ยนสิทธิ์เรียบร้อยแล้ว' };
     }
     const newRole = await this.prisma.role.findUnique({
       where: { id: dto.roleId },
@@ -266,7 +291,7 @@ export class AdminService {
       where: { id: userId },
       data: roleChangeSignOut(dto.roleId),
     });
-    return { message: 'Role updated successfully' };
+    return { message: 'เปลี่ยนสิทธิ์เรียบร้อยแล้ว' };
   }
 
   async getAuditLogs(query: PaginationDto) {
@@ -331,7 +356,7 @@ export class AdminService {
       });
     }
     const updated = await this.prisma.adminSetting.findMany();
-    return { message: 'Settings updated successfully', data: updated };
+    return { message: 'บันทึกการตั้งค่าเรียบร้อยแล้ว', data: updated };
   }
 
   getSystemHealth() {
@@ -414,7 +439,7 @@ export class AdminService {
         OR: [{ isUsed: true }, { expiredAt: { lt: new Date() } }],
       },
     });
-    return { message: `Purged ${result.count} CAPTCHA records` };
+    return { message: `ลบข้อมูล CAPTCHA แล้ว ${result.count} รายการ` };
   }
 
   async getRoles() {

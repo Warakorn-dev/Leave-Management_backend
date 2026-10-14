@@ -281,6 +281,10 @@ model User {
   // Security fields
   failedLoginAttempts Int       @default(0)
   lockedUntil         DateTime?
+  // Time of the latest wrong password. Failed attempts count toward the
+  // lockout only while they are within LOCKOUT_DURATION_MINUTES of each other
+  // ("5 times within 15 minutes", business decision 2026-10-14, D-08).
+  lastFailedLoginAt   DateTime?
   lastLoginAt         DateTime?
   lastLoginIp         String?
   tokenVersion        Int       @default(0)
