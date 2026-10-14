@@ -23,6 +23,7 @@ import { AppModule } from '../../src/app.module';
 import { NotificationService } from '../../src/modules/notification/notification.service';
 import { ResponseInterceptor } from '../../src/utils/response.interceptor';
 import { HttpExceptionFilter } from '../../src/utils/http-exception.filter';
+import { thaiValidationExceptionFactory } from '../../src/utils/validation-messages';
 
 type Role = 'employee' | 'employee2' | 'manager' | 'hr' | 'ceo' | 'admin';
 type Method = 'get' | 'post' | 'put' | 'patch' | 'delete';
@@ -66,7 +67,7 @@ function call(
 function expectStatus(res: request.Response, ...allowed: number[]) {
   if (!allowed.includes(res.status)) {
     throw new Error(
-      `${res.req.method} ${res.req.path} → ${res.status} (expected ${allowed.join('/')})\n` +
+      `${res.request.method} ${new URL(res.request.url).pathname} → ${res.status} (expected ${allowed.join('/')})\n` +
         JSON.stringify(res.body).slice(0, 600),
     );
   }
@@ -206,6 +207,7 @@ beforeAll(async () => {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      exceptionFactory: thaiValidationExceptionFactory,
     }),
   );
   app.useGlobalInterceptors(new ResponseInterceptor());
@@ -851,6 +853,29 @@ describe('Admin', () => {
     const after = (await prisma.user.findUniqueOrThrow({ where: { id } }))
       .tokenVersion;
     expect(after).toBeGreaterThan(before);
+  });
+
+  it('[D-07] PATCH /admin/users/:id/unlock clears a lockout without signing the user out', async () => {
+    const id = ids.tempUser;
+    await prisma.user.update({
+      where: { id },
+      data: {
+        failedLoginAttempts: 5,
+        lockedUntil: new Date(Date.now() + 15 * 60 * 1000),
+        lastFailedLoginAt: new Date(),
+      },
+    });
+    const before = (await prisma.user.findUniqueOrThrow({ where: { id } }))
+      .tokenVersion;
+    expectStatus(
+      await call('patch', '/admin/users/:id/unlock', 'admin', { id }),
+      200,
+    );
+    const user = await prisma.user.findUniqueOrThrow({ where: { id } });
+    expect(user.lockedUntil).toBeNull();
+    expect(user.failedLoginAttempts).toBe(0);
+    expect(user.lastFailedLoginAt).toBeNull();
+    expect(user.tokenVersion).toBe(before);
   });
 
   it('DELETE /admin/captcha/purge', async () => {

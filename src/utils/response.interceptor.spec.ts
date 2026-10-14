@@ -29,7 +29,7 @@ describe('ResponseInterceptor envelope', () => {
   it('password change: the new session tokens reach the client at body.data (what ChangePasswordCard reads)', async () => {
     const body = (await run({
       success: true,
-      message: 'Profile updated successfully',
+      message: 'บันทึกข้อมูลส่วนตัวเรียบร้อยแล้ว',
       accessToken: 'A',
       refreshToken: 'R',
     })) as { data: { accessToken: string; refreshToken: string } };

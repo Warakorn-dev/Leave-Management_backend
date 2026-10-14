@@ -62,9 +62,7 @@ describe('IDOR — editing a leave', () => {
     const { id } = await submit(U.emp);
     await expect(
       employee.updateLeaveRequest(U.empOtherDept, id, { reason: 'x' }),
-    ).rejects.toThrow(
-      'You do not have permission to update this leave request',
-    );
+    ).rejects.toThrow('คุณไม่มีสิทธิ์แก้ไขคำขอลานี้');
   });
 
   it('business rule: a department head cannot edit a subordinate’s leave waiting for HR', async () => {
@@ -72,9 +70,7 @@ describe('IDOR — editing a leave', () => {
     const before = { ...leaveOf(prisma, id) };
     await expect(
       employee.updateLeaveRequest(U.mgr, id, { reason: 'by manager' }),
-    ).rejects.toThrow(
-      'You do not have permission to update this leave request',
-    );
+    ).rejects.toThrow('คุณไม่มีสิทธิ์แก้ไขคำขอลานี้');
     expect(leaveOf(prisma, id)).toEqual(before);
   });
 
@@ -330,7 +326,7 @@ describe('Business rule — ONLY a "Leader" position is a department head', () =
     await expect(
       mgrFor(notHead).getPendingRequests(U.hrLeader),
     ).rejects.toThrow(
-      'Only HR department heads can access manager approval functions',
+      'เฉพาะฝ่ายบุคคลที่เป็นหัวหน้าแผนกเท่านั้นที่ใช้งานส่วนอนุมัติของหัวหน้าแผนกได้',
     );
 
     const head = orgWithPositions({ 'emp-hr-lead': 'Leader' });

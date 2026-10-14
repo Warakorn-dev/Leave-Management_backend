@@ -82,6 +82,8 @@ function captchaOk() {
   });
 }
 
+const MINUTES_AGO = (m: number) => new Date(Date.now() - m * 60 * 1000);
+
 function dbUser(over: Record<string, unknown> = {}) {
   return {
     id: 'u-1',
@@ -91,6 +93,7 @@ function dbUser(over: Record<string, unknown> = {}) {
     isActive: true,
     lockedUntil: null as Date | null,
     failedLoginAttempts: 0,
+    lastFailedLoginAt: null as Date | null,
     tokenVersion: 3,
     avatarUrl: null,
     role: { name: 'Employee' },
@@ -208,7 +211,7 @@ describe('AuthService.login', () => {
   // Business rule (2026-09-24): unknown user, wrong password and locked
   // account answer with ONE message, so usernames cannot be probed.
   const GENERIC =
-    'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (หากใส่รหัสผ่านผิดติดต่อกัน 5 ครั้ง ระบบจะระงับการเข้าสู่ระบบชั่วคราว 15 นาที)';
+    'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (หากใส่รหัสผ่านผิด 5 ครั้งภายใน 15 นาที ระบบจะระงับการเข้าสู่ระบบชั่วคราว 15 นาที)';
 
   it('unknown user gets the generic message (not a distinct "Invalid credentials")', async () => {
     captchaOk();
@@ -295,23 +298,67 @@ describe('AuthService.login', () => {
     await expect(login('wrong')).rejects.toThrow(GENERIC);
     expect(prisma.user.update).toHaveBeenNthCalledWith(1, {
       where: { id: 'u-1' },
-      data: { failedLoginAttempts: 0, lockedUntil: null },
+      data: {
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        lastFailedLoginAt: null,
+      },
     });
     expect(prisma.user.update).toHaveBeenNthCalledWith(2, {
       where: { id: 'u-1' },
-      data: { failedLoginAttempts: 1, lockedUntil: null },
+      data: {
+        failedLoginAttempts: 1,
+        lockedUntil: null,
+        lastFailedLoginAt: expect.any(Date) as unknown,
+      },
     });
   });
 
   it('a wrong password is still counted (default max 5)', async () => {
     captchaOk();
-    prisma.user.findFirst.mockResolvedValue(dbUser({ failedLoginAttempts: 2 }));
+    prisma.user.findFirst.mockResolvedValue(
+      dbUser({ failedLoginAttempts: 2, lastFailedLoginAt: MINUTES_AGO(1) }),
+    );
     await expect(login('wrong')).rejects.toThrow(GENERIC);
     expect(prisma.user.update).toHaveBeenCalledTimes(1);
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'u-1' },
-      data: { failedLoginAttempts: 3, lockedUntil: null },
+      data: {
+        failedLoginAttempts: 3,
+        lockedUntil: null,
+        lastFailedLoginAt: expect.any(Date) as unknown,
+      },
     });
+  });
+
+  // D-08 (business decision 2026-10-14): "5 wrong passwords within 15 minutes".
+  it('[D-08] a wrong password long after the previous one starts counting again at 1 (no lock)', async () => {
+    captchaOk();
+    prisma.user.findFirst.mockResolvedValue(
+      dbUser({ failedLoginAttempts: 4, lastFailedLoginAt: MINUTES_AGO(16) }),
+    );
+    await expect(login('wrong')).rejects.toThrow(GENERIC);
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u-1' },
+      data: {
+        failedLoginAttempts: 1,
+        lockedUntil: null,
+        lastFailedLoginAt: expect.any(Date) as unknown,
+      },
+    });
+  });
+
+  it('[D-08] the 5th wrong password within 15 minutes locks the account', async () => {
+    captchaOk();
+    prisma.user.findFirst.mockResolvedValue(
+      dbUser({ failedLoginAttempts: 4, lastFailedLoginAt: MINUTES_AGO(14) }),
+    );
+    await expect(login('wrong')).rejects.toThrow(GENERIC);
+    const { data } = (prisma.user.update.mock.calls as unknown[][])[0][0] as {
+      data: { failedLoginAttempts: number; lockedUntil: Date | null };
+    };
+    expect(data.failedLoginAttempts).toBe(5);
+    expect(data.lockedUntil).toBeInstanceOf(Date);
   });
 
   it('reaching the limit locks the account for the configured minutes; the message states the (global) policy', async () => {
@@ -326,10 +373,12 @@ describe('AuthService.login', () => {
               : null,
         ),
     );
-    prisma.user.findFirst.mockResolvedValue(dbUser({ failedLoginAttempts: 2 }));
+    prisma.user.findFirst.mockResolvedValue(
+      dbUser({ failedLoginAttempts: 2, lastFailedLoginAt: MINUTES_AGO(1) }),
+    );
     const before = Date.now();
     await expect(login('wrong')).rejects.toThrow(
-      'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (หากใส่รหัสผ่านผิดติดต่อกัน 3 ครั้ง ระบบจะระงับการเข้าสู่ระบบชั่วคราว 30 นาที)',
+      'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (หากใส่รหัสผ่านผิด 3 ครั้งภายใน 30 นาที ระบบจะระงับการเข้าสู่ระบบชั่วคราว 30 นาที)',
     );
     const { data } = (prisma.user.update.mock.calls as unknown[][])[0][0] as {
       data: { failedLoginAttempts: number; lockedUntil: Date };
@@ -350,6 +399,7 @@ describe('AuthService.login', () => {
       data: expect.objectContaining({
         failedLoginAttempts: 0,
         lockedUntil: null,
+        lastFailedLoginAt: null,
         lastLoginIp: '10.0.0.1',
       }) as unknown,
     });
@@ -408,13 +458,13 @@ describe('AuthService.logout / refreshTokens', () => {
   it('refresh is denied after logout (no stored token) or for an unknown user', async () => {
     prisma.user.findUnique.mockResolvedValueOnce(null);
     await expect(service.refreshTokens('u-x', 't')).rejects.toThrow(
-      'Access Denied',
+      'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่',
     );
     prisma.user.findUnique.mockResolvedValueOnce(
       dbUser({ refreshToken: null }),
     );
     await expect(service.refreshTokens('u-1', 't')).rejects.toThrow(
-      'Access Denied',
+      'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่',
     );
   });
 
@@ -432,7 +482,7 @@ describe('AuthService.logout / refreshTokens', () => {
       dbUser({ refreshToken: await bcrypt.hash('real', 4) }),
     );
     await expect(service.refreshTokens('u-1', 'stolen')).rejects.toThrow(
-      'Access Denied',
+      'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่',
     );
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
@@ -501,7 +551,7 @@ describe('AuthService.forgotPassword / resetPassword', () => {
       mail.sendEmail.mock.calls as unknown[][]
     )[0] as string[];
     expect(to).toBe('emp@nid.test');
-    expect(subject).toContain('Reset');
+    expect(subject).toContain('รีเซ็ตรหัสผ่าน');
 
     const token = await tokenFromEmail();
     expect(
@@ -521,7 +571,7 @@ describe('AuthService.forgotPassword / resetPassword', () => {
     const token = await tokenFromEmail();
     await expect(
       service.resetPassword({ token, newPassword: 'N3w-password!' }),
-    ).resolves.toEqual({ message: 'Password reset successfully' });
+    ).resolves.toEqual({ message: 'รีเซ็ตรหัสผ่านเรียบร้อยแล้ว' });
 
     const call = (prisma.user.updateMany.mock.calls as unknown[][])[0][0] as {
       where: unknown;
@@ -543,7 +593,7 @@ describe('AuthService.forgotPassword / resetPassword', () => {
 
     await expect(
       service.resetPassword({ token, newPassword: 'Second-222' }),
-    ).rejects.toThrow('Invalid or expired token');
+    ).rejects.toThrow('ลิงก์รีเซ็ตรหัสผ่านไม่ถูกต้องหรือหมดอายุแล้ว');
     expect(row.passwordHash).toBe(afterFirst);
   });
 
@@ -566,7 +616,7 @@ describe('AuthService.forgotPassword / resetPassword', () => {
     row.tokenVersion += 1; // e.g. the user logged out afterwards
     await expect(
       service.resetPassword({ token, newPassword: 'Late-1234' }),
-    ).rejects.toThrow('Invalid or expired token');
+    ).rejects.toThrow('ลิงก์รีเซ็ตรหัสผ่านไม่ถูกต้องหรือหมดอายุแล้ว');
   });
 
   it('an ACCESS token (as issued at login) is refused as a reset token; nothing is written', async () => {
@@ -577,7 +627,7 @@ describe('AuthService.forgotPassword / resetPassword', () => {
     );
     await expect(
       service.resetPassword({ token: access, newPassword: 'Owned-123' }),
-    ).rejects.toThrow('Invalid or expired token');
+    ).rejects.toThrow('ลิงก์รีเซ็ตรหัสผ่านไม่ถูกต้องหรือหมดอายุแล้ว');
     expect(prisma.user.updateMany).not.toHaveBeenCalled();
   });
 
@@ -628,7 +678,7 @@ describe('AuthService.forgotPassword / resetPassword', () => {
     async (_n, token) => {
       await expect(
         service.resetPassword({ token, newPassword: 'x' }),
-      ).rejects.toThrow('Invalid or expired token');
+      ).rejects.toThrow('ลิงก์รีเซ็ตรหัสผ่านไม่ถูกต้องหรือหมดอายุแล้ว');
       expect(prisma.user.updateMany).not.toHaveBeenCalled();
       expect(prisma.user.update).not.toHaveBeenCalled();
     },
@@ -728,7 +778,7 @@ describe('Business rule — first password change needs no current password; lat
     ).resolves.toEqual(
       expect.objectContaining({
         success: true,
-        message: 'Profile updated successfully',
+        message: 'บันทึกข้อมูลส่วนตัวเรียบร้อยแล้ว',
       }),
     );
     await expect(bcrypt.compare('Mine-2026', row.passwordHash)).resolves.toBe(
@@ -956,7 +1006,7 @@ describe('Business rule — a password change signs out every OTHER device, keep
     const out = await service.updateProfile('u-1', { phone: '0811111111' });
     expect(out).toEqual({
       success: true,
-      message: 'Profile updated successfully',
+      message: 'บันทึกข้อมูลส่วนตัวเรียบร้อยแล้ว',
     });
     expect(prisma.user.update).not.toHaveBeenCalled();
   });

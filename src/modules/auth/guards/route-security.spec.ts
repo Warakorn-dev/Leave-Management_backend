@@ -270,7 +270,7 @@ describe('Authorization: every role-guarded route declares roles', () => {
       switchToHttp: () => ({ getRequest: () => ({ user: undefined }) }),
     };
     expect(() => guard.canActivate(ctx as never)).toThrow(
-      'No role found for user',
+      'ไม่พบสิทธิ์การใช้งานของผู้ใช้',
     );
   });
 });

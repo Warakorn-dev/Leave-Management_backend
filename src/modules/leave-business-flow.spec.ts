@@ -414,7 +414,7 @@ describe('FLOW 4 — Rejection at every stage', () => {
   ])('%s cannot reject without a reason', async (_who, rejectWithoutReason) => {
     const { id } = await submit(U.emp, LT.vacation);
     await expect(rejectWithoutReason(id)).rejects.toThrow(
-      'A rejection reason is required',
+      'กรุณาระบุเหตุผลที่ไม่อนุมัติ',
     );
   });
 
@@ -494,16 +494,16 @@ describe('FLOW 4 — Rejection at every stage', () => {
     const { id } = await submit(U.emp, LT.sick);
     await hrReject(id, 'x');
     await expect(hrReject(id, 'y')).rejects.toThrow(
-      'Invalid request or already verified',
+      'คำขอไม่ถูกต้อง หรือได้รับการตรวจสอบไปแล้ว',
     );
     await expect(hrApprove(id)).rejects.toThrow(
-      'Invalid request or already verified',
+      'คำขอไม่ถูกต้อง หรือได้รับการตรวจสอบไปแล้ว',
     );
     await expect(mgrApprove(id)).rejects.toThrow(
-      'Invalid request or already processed',
+      'คำขอไม่ถูกต้อง หรือได้รับการพิจารณาไปแล้ว',
     );
     await expect(ceoApprove(id)).rejects.toThrow(
-      'Request is not waiting for CEO approval',
+      'คำขอนี้ไม่ได้อยู่ในสถานะรอผู้บริหารอนุมัติ',
     );
   });
 });
@@ -563,13 +563,49 @@ describe('FLOW 5 — Employee cancels an approved leave', () => {
     );
   });
 
+  it('[D-01] cancelling a leave still waiting for the department head refunds nothing', async () => {
+    await approvedLeave(); // 2 days deducted → 28 left
+    const { id } = await submit(U.emp, LT.sick, {
+      startDate: '2026-10-12',
+      endDate: '2026-10-13',
+    });
+    await hrApprove(id);
+    expect(leaveOf(prisma, id).status).toBe('PENDING_SUPERVISOR');
+
+    await employee.deleteLeaveRequest(U.emp, id);
+    await hrApprove(id);
+
+    expect(leaveOf(prisma, id).status).toBe('CANCELLED');
+    expect(balanceOf(prisma, 'emp-1', LT.sick.id)).toEqual(
+      expect.objectContaining({ remainingDays: 28, usedDays: 2 }),
+    );
+    expect(notificationsFor(prisma, U.emp).at(-1)!.message).not.toContain(
+      'คืนโควตา',
+    );
+  });
+
+  it('[D-01] cancelling a leave still waiting for the CEO refunds nothing', async () => {
+    await approvedLeave(U.emp, LT.vacation); // 6 - 2 → 4 left
+    const { id } = await submit(U.emp, LT.vacation, {
+      startDate: '2026-10-12',
+      endDate: '2026-10-13',
+    });
+    await hrApprove(id);
+    await mgrApprove(id);
+    expect(leaveOf(prisma, id).status).toBe('PENDING_EXECUTIVE');
+
+    await employee.deleteLeaveRequest(U.emp, id);
+    await hrApprove(id);
+
+    expect(leaveOf(prisma, id).status).toBe('CANCELLED');
+    expect(balanceOf(prisma, 'emp-1', LT.vacation.id)!.remainingDays).toBe(4);
+  });
+
   it('HR rejects the cancellation: reason required, leave stays APPROVED, balance kept, employee told why', async () => {
     const id = await approvedLeave();
     await employee.deleteLeaveRequest(U.emp, id);
 
-    await expect(hrReject(id)).rejects.toThrow(
-      'A rejection reason is required',
-    );
+    await expect(hrReject(id)).rejects.toThrow('กรุณาระบุเหตุผลที่ไม่อนุมัติ');
     await hrReject(id, 'อยู่ในช่วงปิดโปรเจกต์');
 
     expect(leaveOf(prisma, id).status).toBe('APPROVED');
@@ -593,7 +629,7 @@ describe('FLOW 5 — Employee cancels an approved leave', () => {
     const id = await approvedLeave();
     await employee.deleteLeaveRequest(U.emp, id);
     await expect(employee.deleteLeaveRequest(U.emp, id)).rejects.toThrow(
-      'Cancellation request is already waiting for HR review',
+      'คำขอยกเลิกนี้อยู่ระหว่างรอฝ่ายบุคคลตรวจสอบแล้ว',
     );
     await hrApprove(id);
     await expect(employee.deleteLeaveRequest(U.emp, id)).rejects.toThrow(
@@ -667,7 +703,7 @@ describe('FLOW 6 — Manager sick leave (HR → CEO)', () => {
     const { id } = await submit(U.mgr, LT.sick);
     await hrApprove(id);
     await expect(mgrApprove(id)).rejects.toThrow(
-      'Invalid request or already processed',
+      'คำขอไม่ถูกต้อง หรือได้รับการพิจารณาไปแล้ว',
     );
   });
 
@@ -727,10 +763,10 @@ describe('FLOW 7 — Manager sick leave rejected by the CEO', () => {
     expect(emailsTo(mail, 'mgr@nid.test').at(-1)![2]).toContain('ขาดคนดูแลทีม');
 
     await expect(ceoApprove(id)).rejects.toThrow(
-      'Request is not waiting for CEO approval',
+      'คำขอนี้ไม่ได้อยู่ในสถานะรอผู้บริหารอนุมัติ',
     );
     await expect(ceoReject(id, 'again')).rejects.toThrow(
-      'Request is not waiting for CEO approval',
+      'คำขอนี้ไม่ได้อยู่ในสถานะรอผู้บริหารอนุมัติ',
     );
   });
 });
@@ -765,7 +801,7 @@ describe('FLOW 9 — Manager other leave', () => {
   it('HR reject needs a reason, sets REJECTED, and the manager can submit again', async () => {
     const { id } = await submit(U.mgr, LT.ordination);
     await expect(hrReject(id, '   ')).rejects.toThrow(
-      'A rejection reason is required',
+      'กรุณาระบุเหตุผลที่ไม่อนุมัติ',
     );
     await hrReject(id, 'ขาดหนังสือรับรอง');
     expect(leaveOf(prisma, id).status).toBe('REJECTED');
@@ -870,7 +906,7 @@ describe('Authorization inside the services', () => {
     const { id } = await submit(U.empOtherDept, LT.sick);
     await hrApprove(id);
     await expect(mgrApprove(id, U.mgr)).rejects.toThrow(
-      'Employee is not in your department',
+      'พนักงานไม่ได้อยู่ในแผนกของคุณ',
     );
     await mgrApprove(id, U.mgrOtherDept);
     expect(leaveOf(prisma, id).status).toBe('APPROVED');
@@ -973,11 +1009,11 @@ describe('Edge cases', () => {
   it('unknown leave type / missing balance row is refused', async () => {
     await expect(
       submit(U.emp, { ...LT.sick, id: 'lt-does-not-exist' }),
-    ).rejects.toThrow('Leave balance not found');
+    ).rejects.toThrow('ไม่พบสิทธิ์วันลาของประเภทนี้ กรุณาติดต่อฝ่ายบุคคล');
 
     build({ balanceOverrides: { 'emp-1': { [LT.sick.id]: null } } });
     await expect(submit(U.emp, LT.sick)).rejects.toThrow(
-      'Leave balance not found',
+      'ไม่พบสิทธิ์วันลาของประเภทนี้ กรุณาติดต่อฝ่ายบุคคล',
     );
   });
 
@@ -987,7 +1023,7 @@ describe('Edge cases', () => {
         startDate: '2026-10-06',
         endDate: '2026-10-05',
       }),
-    ).rejects.toThrow('Start date must be before or equal to end date');
+    ).rejects.toThrow('วันที่เริ่มต้นต้องไม่อยู่หลังวันที่สิ้นสุด');
   });
 
   it('a weekend-only range (0 working days) is refused', async () => {
@@ -1039,24 +1075,22 @@ describe('Edge cases', () => {
     await expect(employee.deleteLeaveRequest(U.emp, 'nope')).rejects.toThrow(
       NotFoundException,
     );
-    await expect(hr.markAsViewed(U.hr, 'nope')).rejects.toThrow(
-      'Request not found',
-    );
+    await expect(hr.markAsViewed(U.hr, 'nope')).rejects.toThrow('ไม่พบคำขอลา');
   });
 
   it('approving twice is refused (HR, manager, CEO)', async () => {
     const { id } = await submit(U.emp, LT.vacation);
     await hrApprove(id);
     await expect(hrApprove(id)).rejects.toThrow(
-      'Invalid request or already verified',
+      'คำขอไม่ถูกต้อง หรือได้รับการตรวจสอบไปแล้ว',
     );
     await mgrApprove(id);
     await expect(mgrApprove(id)).rejects.toThrow(
-      'Invalid request or already processed',
+      'คำขอไม่ถูกต้อง หรือได้รับการพิจารณาไปแล้ว',
     );
     await ceoApprove(id);
     await expect(ceoApprove(id)).rejects.toThrow(
-      'Request is not waiting for CEO approval',
+      'คำขอนี้ไม่ได้อยู่ในสถานะรอผู้บริหารอนุมัติ',
     );
     expect(balanceOf(prisma, 'emp-1', LT.vacation.id)!.remainingDays).toBe(4);
   });
@@ -1065,7 +1099,9 @@ describe('Edge cases', () => {
     const { id } = await submit(U.emp, LT.sick);
     await hrApprove(id);
     balanceOf(prisma, 'emp-1', LT.sick.id)!.remainingDays = 1;
-    await expect(mgrApprove(id)).rejects.toThrow('Insufficient leave balance');
+    await expect(mgrApprove(id)).rejects.toThrow(
+      'สิทธิ์วันลาคงเหลือไม่เพียงพอ',
+    );
     expect(prisma.leaveBalance.update).not.toHaveBeenCalled();
   });
 

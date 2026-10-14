@@ -52,7 +52,7 @@ describe('RolesGuard', () => {
     const p = ManagerController.prototype as unknown as Record<string, Handler>;
     expect(() =>
       guard.canActivate(contextFor(ManagerController, p.approveRequest)),
-    ).toThrow(new ForbiddenException('No role found for user'));
+    ).toThrow(new ForbiddenException('ไม่พบสิทธิ์การใช้งานของผู้ใช้'));
   });
 
   it('refuses a role that is not listed', () => {
@@ -61,7 +61,7 @@ describe('RolesGuard', () => {
       guard.canActivate(
         contextFor(CeoController, p.approveSpecialLeave, 'Manager'),
       ),
-    ).toThrow(new ForbiddenException('Insufficient permissions'));
+    ).toThrow(new ForbiddenException('คุณไม่มีสิทธิ์ในการดำเนินการนี้'));
   });
 
   it('lets a handler through when no @Roles metadata exists (why every route must declare roles)', () => {

@@ -214,7 +214,7 @@ export class EmployeeMutationService {
         endDate = new Date(dto.leaveDate + 'T' + dto.endTime + ':00');
 
         if (endDate <= startDate) {
-          throw new BadRequestException('End time must be after start time');
+          throw new BadRequestException('เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่มต้น');
         }
 
         const diffMs = endDate.getTime() - startDate.getTime();
@@ -239,7 +239,7 @@ export class EmployeeMutationService {
         }
       } else {
         throw new BadRequestException(
-          'Incomplete data for the selected leave mode',
+          'ข้อมูลไม่ครบถ้วนสำหรับรูปแบบการลาที่เลือก',
         );
       }
     } else {
@@ -250,7 +250,7 @@ export class EmployeeMutationService {
 
     if (startDate > endDate) {
       throw new BadRequestException(
-        'Start date must be before or equal to end date',
+        'วันที่เริ่มต้นต้องไม่อยู่หลังวันที่สิ้นสุด',
       );
     }
 
@@ -279,7 +279,9 @@ export class EmployeeMutationService {
     });
 
     if (!balance) {
-      throw new BadRequestException('Leave balance not found');
+      throw new BadRequestException(
+        'ไม่พบสิทธิ์วันลาของประเภทนี้ กรุณาติดต่อฝ่ายบุคคล',
+      );
     }
 
     const advanceNoticeDays = balance.leaveType.advanceNoticeDays || 0;
@@ -631,7 +633,7 @@ export class EmployeeMutationService {
     });
 
     if (!request) {
-      throw new NotFoundException('Leave request not found');
+      throw new NotFoundException('ไม่พบคำขอลา');
     }
 
     // Business rule (2026-09-24): only the owner, HR or the CEO may edit a leave
@@ -641,9 +643,7 @@ export class EmployeeMutationService {
       employee.user?.role?.name !== 'HR' &&
       employee.user?.role?.name !== 'CEO'
     ) {
-      throw new ForbiddenException(
-        'You do not have permission to update this leave request',
-      );
+      throw new ForbiddenException('คุณไม่มีสิทธิ์แก้ไขคำขอลานี้');
     }
 
     const allowedStatuses = ['PENDING_VERIFY', 'REVIEWING_HR'];
@@ -679,7 +679,7 @@ export class EmployeeMutationService {
         newEndDate = new Date(dto.leaveDate + 'T' + dto.endTime + ':00');
 
         if (newEndDate <= newStartDate) {
-          throw new BadRequestException('End time must be after start time');
+          throw new BadRequestException('เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่มต้น');
         }
 
         const diffMs = newEndDate.getTime() - newStartDate.getTime();
@@ -704,7 +704,7 @@ export class EmployeeMutationService {
         }
       } else {
         throw new BadRequestException(
-          'Incomplete data for the selected leave mode',
+          'ข้อมูลไม่ครบถ้วนสำหรับรูปแบบการลาที่เลือก',
         );
       }
     } else {
@@ -717,7 +717,7 @@ export class EmployeeMutationService {
     if (dto.startDate || dto.endDate || dto.leaveMode) {
       if (newStartDate > newEndDate) {
         throw new BadRequestException(
-          'Start date must be before or equal to end date',
+          'วันที่เริ่มต้นต้องไม่อยู่หลังวันที่สิ้นสุด',
         );
       }
 
@@ -745,7 +745,9 @@ export class EmployeeMutationService {
       });
 
       if (!balance) {
-        throw new BadRequestException('Leave balance not found');
+        throw new BadRequestException(
+          'ไม่พบสิทธิ์วันลาของประเภทนี้ กรุณาติดต่อฝ่ายบุคคล',
+        );
       }
 
       const advanceNoticeDays = balance.leaveType?.advanceNoticeDays || 0;
@@ -906,7 +908,7 @@ export class EmployeeMutationService {
     });
 
     if (!request || request.employeeId !== employee.id) {
-      throw new NotFoundException('Leave request not found');
+      throw new NotFoundException('ไม่พบคำขอลา');
     }
 
     if (
@@ -916,7 +918,7 @@ export class EmployeeMutationService {
     ) {
       throw new ForbiddenException(
         request.status === 'PENDING_CANCELLATION'
-          ? 'Cancellation request is already waiting for HR review'
+          ? 'คำขอยกเลิกนี้อยู่ระหว่างรอฝ่ายบุคคลตรวจสอบแล้ว'
           : 'คำขอนี้ไม่สามารถยกเลิกได้แล้ว',
       );
     }
@@ -931,8 +933,6 @@ export class EmployeeMutationService {
         data: { status: 'CANCELLED' },
       });
     }
-
-
 
     // An approved future leave requires HR confirmation before it is cancelled
     // and its balance is returned.
@@ -974,7 +974,7 @@ export class EmployeeMutationService {
       where: { userId },
       include: { user: { include: { role: true } } },
     });
-    if (!employee) throw new NotFoundException('Employee profile not found');
+    if (!employee) throw new NotFoundException('ไม่พบข้อมูลพนักงาน');
     return employee;
   }
 

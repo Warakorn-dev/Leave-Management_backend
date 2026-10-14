@@ -323,7 +323,7 @@ describe('UploadController.uploadAvatar', () => {
 
   it('missing file is refused', async () => {
     await expect(ctrl.uploadAvatar(undefined as never, me)).rejects.toThrow(
-      'File is required',
+      'กรุณาเลือกไฟล์',
     );
   });
 

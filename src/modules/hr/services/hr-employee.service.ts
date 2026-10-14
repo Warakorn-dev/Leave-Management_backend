@@ -31,7 +31,7 @@ export class HrEmployeeService {
       where: { email: dto.email },
     });
     if (existingUser) {
-      throw new BadRequestException('Email already in use');
+      throw new BadRequestException('อีเมลนี้ถูกใช้งานแล้ว');
     }
 
     let roleId = dto.roleId;
@@ -78,7 +78,10 @@ export class HrEmployeeService {
       } else {
         roleId = defaultRole.id;
       }
-      if (!roleId) throw new BadRequestException('No default role found');
+      if (!roleId)
+        throw new BadRequestException(
+          'ไม่พบสิทธิ์เริ่มต้นในระบบ กรุณาติดต่อผู้ดูแลระบบ',
+        );
     }
 
     await assertHrAssignableRole(this.prisma, roleId);
@@ -143,7 +146,7 @@ export class HrEmployeeService {
   async updateEmployee(id: string, dto: UpdateEmployeeDto) {
     return this.prisma.$transaction(async (prisma) => {
       const employee = await prisma.employee.findUnique({ where: { id } });
-      if (!employee) throw new NotFoundException('Employee not found');
+      if (!employee) throw new NotFoundException('ไม่พบข้อมูลพนักงาน');
       await assertNotAdminAccount(prisma, employee.userId);
 
       let updatedRoleId = dto.roleId;
@@ -249,7 +252,7 @@ export class HrEmployeeService {
     const active = isActive === true || isActive === ('true' as any);
 
     const employee = await this.prisma.employee.findUnique({ where: { id } });
-    if (!employee) throw new NotFoundException('Employee not found');
+    if (!employee) throw new NotFoundException('ไม่พบข้อมูลพนักงาน');
     await assertNotAdminAccount(this.prisma, employee.userId);
 
     await this.prisma.user.update({
@@ -317,7 +320,7 @@ export class HrEmployeeService {
         },
       },
     });
-    if (!employee) throw new NotFoundException('Employee not found');
+    if (!employee) throw new NotFoundException('ไม่พบข้อมูลพนักงาน');
     return employee;
   }
 
@@ -326,7 +329,7 @@ export class HrEmployeeService {
       where: { id: employeeId },
       include: { leaveBalances: true },
     });
-    if (!employee) throw new NotFoundException('Employee not found');
+    if (!employee) throw new NotFoundException('ไม่พบข้อมูลพนักงาน');
 
     const currentYear = new Date().getFullYear();
     const existingBalances = employee.leaveBalances.filter(
@@ -397,7 +400,7 @@ export class HrEmployeeService {
       where: { id: employeeId },
       include: { leaveBalances: true },
     });
-    if (!employee) throw new NotFoundException('Employee not found');
+    if (!employee) throw new NotFoundException('ไม่พบข้อมูลพนักงาน');
 
     const currentYear = new Date().getFullYear();
     const existingBalances = employee.leaveBalances.filter(
@@ -414,7 +417,7 @@ export class HrEmployeeService {
       });
     }
 
-    return { success: true, message: 'Reset successful' };
+    return { success: true, message: 'รีเซ็ตสิทธิ์วันลาเรียบร้อยแล้ว' };
   }
 
   async deleteEmployee(id: string) {
@@ -423,7 +426,7 @@ export class HrEmployeeService {
       where: { id },
       include: { user: true },
     });
-    if (!employee) throw new NotFoundException('Employee not found');
+    if (!employee) throw new NotFoundException('ไม่พบข้อมูลพนักงาน');
     await assertNotAdminAccount(this.prisma, employee.userId);
 
     return this.prisma.$transaction(async (prisma) => {
@@ -440,7 +443,7 @@ export class HrEmployeeService {
       where: { id },
     });
     if (!balance) {
-      throw new NotFoundException('Leave balance not found');
+      throw new NotFoundException('ไม่พบข้อมูลสิทธิ์วันลา');
     }
 
     const newTotalDays =
@@ -452,7 +455,7 @@ export class HrEmployeeService {
 
     if (newRemainingDays < 0 || newRemainingDays > newTotalDays) {
       throw new BadRequestException(
-        `Remaining leave balance must be between 0 and ${newTotalDays}`,
+        `สิทธิ์วันลาคงเหลือต้องอยู่ระหว่าง 0 ถึง ${newTotalDays} วัน`,
       );
     }
 

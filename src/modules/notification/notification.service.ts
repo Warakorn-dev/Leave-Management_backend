@@ -256,7 +256,9 @@ export class NotificationService {
     });
 
     if (result.count === 0) {
-      throw new NotFoundException('Notification not found or access denied');
+      throw new NotFoundException(
+        'ไม่พบการแจ้งเตือน หรือคุณไม่มีสิทธิ์เข้าถึง',
+      );
     }
 
     return { success: true };

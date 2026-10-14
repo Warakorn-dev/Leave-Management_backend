@@ -102,7 +102,9 @@ export class ManagerService {
     });
 
     if (!request || request.status !== 'PENDING_SUPERVISOR') {
-      throw new BadRequestException('Invalid request or already processed');
+      throw new BadRequestException(
+        'คำขอไม่ถูกต้อง หรือได้รับการพิจารณาไปแล้ว',
+      );
     }
 
     if (request.employeeId === manager.id) {
@@ -112,11 +114,11 @@ export class ManagerService {
     }
 
     if (action === 'Reject' && !dto.comment?.trim()) {
-      throw new BadRequestException('A rejection reason is required');
+      throw new BadRequestException('กรุณาระบุเหตุผลที่ไม่อนุมัติ');
     }
 
     if (request.employee.departmentId !== manager.departmentId) {
-      throw new BadRequestException('Employee is not in your department');
+      throw new BadRequestException('พนักงานไม่ได้อยู่ในแผนกของคุณ');
     }
 
     let nextStatus = '';
@@ -142,7 +144,9 @@ export class ManagerService {
           data: { status: nextStatus },
         });
         if (claimed.count === 0) {
-          throw new BadRequestException('Invalid request or already processed');
+          throw new BadRequestException(
+            'คำขอไม่ถูกต้อง หรือได้รับการพิจารณาไปแล้ว',
+          );
         }
         const updatedRequest = await prisma.leaveRequest.findUniqueOrThrow({
           where: { id: requestId },
@@ -176,7 +180,7 @@ export class ManagerService {
               leaveBalance.remainingDays - request.totalDays;
 
             if (newRemainingDays < 0) {
-              throw new BadRequestException('Insufficient leave balance');
+              throw new BadRequestException('สิทธิ์วันลาคงเหลือไม่เพียงพอ');
             }
 
             const newUsedDays = leaveBalance.totalDays - newRemainingDays;
@@ -310,13 +314,13 @@ export class ManagerService {
       where: { userId },
       include: { position: true, user: { include: { role: true } } },
     });
-    if (!employee) throw new NotFoundException('Manager profile not found');
+    if (!employee) throw new NotFoundException('ไม่พบข้อมูลหัวหน้าแผนก');
 
     const roleName = employee.user?.role?.name;
     if (roleName === 'HR') {
       if (!isLeaderPosition(employee.position?.name)) {
         throw new ForbiddenException(
-          'Only HR department heads can access manager approval functions',
+          'เฉพาะฝ่ายบุคคลที่เป็นหัวหน้าแผนกเท่านั้นที่ใช้งานส่วนอนุมัติของหัวหน้าแผนกได้',
         );
       }
     }

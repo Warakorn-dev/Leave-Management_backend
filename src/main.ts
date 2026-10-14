@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpExceptionFilter } from './utils/http-exception.filter';
 import { ResponseInterceptor } from './utils/response.interceptor';
+import { thaiValidationExceptionFactory } from './utils/validation-messages';
 import { createOriginGuard, normalizeOrigin } from './utils/origin-guard';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -74,6 +75,8 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      // D-05: every DTO error reaches the user in Thai.
+      exceptionFactory: thaiValidationExceptionFactory,
     }),
   );
 
