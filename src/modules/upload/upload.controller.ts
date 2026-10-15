@@ -96,7 +96,7 @@ export class UploadController {
     // Verify leave request exists
     const leaveRequest = await this.prisma.leaveRequest.findUnique({
       where: { id: leaveRequestId },
-      include: { employee: { include: { user: true } } },
+      include: { employee: true },
     });
     if (!leaveRequest) {
       // Clean up uploaded temp file
