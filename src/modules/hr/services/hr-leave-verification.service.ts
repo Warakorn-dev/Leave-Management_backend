@@ -280,18 +280,6 @@ export class HrLeaveVerificationService {
     }
 
     if (request.status === 'PENDING_CANCELLATION') {
-      if (action === 'Approve') {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const startDay = new Date(request.startDate);
-        startDay.setHours(0, 0, 0, 0);
-        if (startDay <= today) {
-          throw new BadRequestException(
-            'ไม่สามารถยกเลิกใบลาที่ถึงวันเริ่มลาแล้ว',
-          );
-        }
-      }
-
       // The status the leave had before the employee asked to cancel it.
       const latestApproval = await this.prisma.leaveApproval.findFirst({
         where: {

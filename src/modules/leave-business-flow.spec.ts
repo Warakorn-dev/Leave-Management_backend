@@ -563,6 +563,22 @@ describe('FLOW 5 — Employee cancels an approved leave', () => {
     );
   });
 
+  it('HR can approve cancelling a leave that has already started', async () => {
+    const id = await approvedLeave();
+    jest.setSystemTime(new Date('2026-10-05T03:00:00.000Z')); // first day of the leave
+    try {
+      await employee.deleteLeaveRequest(U.emp, id);
+      await hrApprove(id);
+    } finally {
+      jest.setSystemTime(TODAY);
+    }
+
+    expect(leaveOf(prisma, id).status).toBe('CANCELLED');
+    expect(balanceOf(prisma, 'emp-1', LT.sick.id)).toEqual(
+      expect.objectContaining({ remainingDays: 30, usedDays: 0 }),
+    );
+  });
+
   it('[D-01] cancelling a leave still waiting for the department head refunds nothing', async () => {
     await approvedLeave(); // 2 days deducted → 28 left
     const { id } = await submit(U.emp, LT.sick, {
