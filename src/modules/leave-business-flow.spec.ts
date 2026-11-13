@@ -13,9 +13,11 @@
  */
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { EmployeeMutationService } from './employee/services/employee-mutation.service';
@@ -1532,5 +1534,359 @@ describe('Concurrency — a double click cannot approve (or deduct) twice', () =
     expect((second as PromiseRejectedResult).reason).toBeInstanceOf(
       BadRequestException,
     );
+  });
+});
+
+// =============================================================================
+describe('Request code collisions', () => {
+  const collision = () =>
+    new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: { target: ['requestCode'] },
+    });
+
+  it('retries with a fresh code when another employee took the sequence first', async () => {
+    prisma.leaveRequest.create.mockImplementationOnce(() => {
+      // The competing request commits just before ours fails on the unique index.
+      const { id } = seedCeoLeave(LT.sick);
+      leaveOf(prisma, id).requestCode = 'L-01-00001-2569';
+      return Promise.reject(collision());
+    });
+
+    const created = await submit(U.emp, LT.sick);
+
+    expect(leaveOf(prisma, created.id).requestCode).toBe('L-01-00002-2569');
+    expect(prisma.leaveRequest.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up with a clear ConflictException after repeated collisions', async () => {
+    prisma.leaveRequest.create.mockImplementation(() =>
+      Promise.reject(collision()),
+    );
+
+    await expect(submit(U.emp, LT.sick)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(prisma.leaveRequest.create).toHaveBeenCalledTimes(5);
+  });
+
+  it('does not retry unrelated database errors', async () => {
+    prisma.leaveRequest.create.mockRejectedValueOnce(new Error('db down'));
+
+    await expect(submit(U.emp, LT.sick)).rejects.toThrow('db down');
+    expect(prisma.leaveRequest.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+// =============================================================================
+describe('Leave across a year boundary', () => {
+  // Mon 4 – Tue 5 Jan 2027, while "today" (fake clock) is in 2026.
+  const NEXT_YEAR = { startDate: '2027-01-04', endDate: '2027-01-05' };
+
+  it('is checked against the balance of the startDate year, not today', async () => {
+    // Balances exist for 2026 only.
+    await expect(submit(U.emp, LT.sick, NEXT_YEAR)).rejects.toThrow(
+      'ไม่พบสิทธิ์วันลาของประเภทนี้',
+    );
+    expect(prisma.leaveRequest.create).not.toHaveBeenCalled();
+  });
+
+  it('is accepted once the startDate year has a balance, and uses that balance', async () => {
+    const this2026 = balanceOf(prisma, 'emp-1', LT.sick.id)!;
+    prisma.state.balances.push({
+      ...this2026,
+      id: 'bal-2027',
+      year: 2027,
+      totalDays: 30,
+      usedDays: 29,
+      remainingDays: 1, // only 1 day left in 2027; the 2-day leave must not fit
+    });
+
+    await expect(submit(U.emp, LT.sick, NEXT_YEAR)).rejects.toThrow(
+      'สิทธิ์วันลาไม่เพียงพอ (เหลือเพียง 1 วัน)',
+    );
+
+    prisma.state.balances.find((b) => b.id === 'bal-2027')!.remainingDays = 30;
+    const created = await submit(U.emp, LT.sick, NEXT_YEAR);
+    expect(leaveOf(prisma, created.id).totalDays).toBe(2);
+  });
+
+  it("pending leave of another year does not reduce this year's available days", async () => {
+    // Pending 2027 leave must not count against the 2026 balance.
+    prisma.state.balances.push({
+      ...balanceOf(prisma, 'emp-1', LT.sick.id)!,
+      id: 'bal-2027',
+      year: 2027,
+    });
+    await submit(U.emp, LT.sick, NEXT_YEAR);
+
+    const created = await submit(U.emp, LT.sick); // Oct 2026, 2 days, balance 30
+    expect(leaveOf(prisma, created.id).totalDays).toBe(2);
+  });
+});
+
+// =============================================================================
+describe('Leave across New Year — balances are used oldest year first', () => {
+  // Tue 29 Dec 2026 – Tue 5 Jan 2027 = 6 working days (no holidays seeded).
+  const OVER_NEW_YEAR = { startDate: '2026-12-29', endDate: '2027-01-05' };
+  const vacation2026 = () => balanceOf(prisma, 'emp-1', LT.vacation.id)!;
+  const vacation2027 = () =>
+    prisma.state.balances.find(
+      (b) =>
+        b.employeeId === 'emp-1' &&
+        b.leaveTypeId === LT.vacation.id &&
+        b.year === 2027,
+    );
+  const deductionsOf = (id: string) =>
+    prisma.state.deductions
+      .filter((d) => d.leaveRequestId === id)
+      .map((d) => ({
+        year: prisma.state.balances.find((b) => b.id === d.leaveBalanceId)!
+          .year,
+        days: d.days,
+      }));
+
+  beforeEach(() =>
+    // 4 vacation days left in 2026 (default 6/year).
+    build({ balanceOverrides: { 'emp-1': { [LT.vacation.id]: 4 } } }),
+  );
+
+  it('4 days left in 2026, 6 days leave: takes 4 from 2026 and 2 from a 2027 balance created on the spot', async () => {
+    const { id } = await submit(U.emp, LT.vacation, OVER_NEW_YEAR);
+    expect(leaveOf(prisma, id).totalDays).toBe(6);
+    expect(vacation2027()).toBeUndefined(); // submitting creates nothing
+
+    await approveFully(id);
+
+    expect(vacation2026()).toEqual(
+      expect.objectContaining({ remainingDays: 0, usedDays: 6 }),
+    );
+    // 2026 was used up first, so nothing is carried over into the new year.
+    expect(vacation2027()).toEqual(
+      expect.objectContaining({
+        totalDays: 6,
+        remainingDays: 4,
+        usedDays: 2,
+      }),
+    );
+    expect(deductionsOf(id)).toEqual([
+      { year: 2026, days: 4 },
+      { year: 2027, days: 2 },
+    ]);
+  });
+
+  it('cancelling the approved leave gives each year back what it took', async () => {
+    const { id } = await submit(U.emp, LT.vacation, OVER_NEW_YEAR);
+    await approveFully(id);
+
+    await employee.deleteLeaveRequest(U.emp, id);
+    await hrApprove(id);
+
+    expect(leaveOf(prisma, id).status).toBe('CANCELLED');
+    expect(vacation2026()).toEqual(
+      expect.objectContaining({ remainingDays: 4, usedDays: 2 }),
+    );
+    expect(vacation2027()).toEqual(
+      expect.objectContaining({ remainingDays: 6, usedDays: 0 }),
+    );
+    expect(deductionsOf(id)).toEqual([]);
+  });
+
+  it('uses an existing 2027 balance as it is (no new one, no extra carry-over)', async () => {
+    prisma.state.balances.push({
+      id: 'bal-2027',
+      employeeId: 'emp-1',
+      leaveTypeId: LT.vacation.id,
+      year: 2027,
+      totalDays: 9,
+      usedDays: 0,
+      remainingDays: 9,
+    });
+    const { id } = await submit(U.emp, LT.vacation, OVER_NEW_YEAR);
+    await approveFully(id);
+
+    expect(vacation2027()).toEqual(
+      expect.objectContaining({ totalDays: 9, remainingDays: 7 }),
+    );
+    expect(prisma.leaveBalance.createMany).not.toHaveBeenCalled();
+  });
+
+  it('is refused at submission when both years together are not enough', async () => {
+    prisma.state.balances.push({
+      id: 'bal-2027',
+      employeeId: 'emp-1',
+      leaveTypeId: LT.vacation.id,
+      year: 2027,
+      totalDays: 6,
+      usedDays: 5,
+      remainingDays: 1,
+    });
+    await expect(submit(U.emp, LT.vacation, OVER_NEW_YEAR)).rejects.toThrow(
+      'สิทธิ์วันลาไม่เพียงพอ (เหลือเพียง 5 วัน)',
+    );
+  });
+
+  it('cannot span more than two calendar years', async () => {
+    await expect(
+      submit(U.emp, LT.vacation, {
+        startDate: '2026-12-29',
+        endDate: '2028-01-04',
+      }),
+    ).rejects.toThrow('ไม่สามารถยื่นลาคร่อมเกิน 2 ปีปฏิทินติดกันได้');
+  });
+
+  it('approval is refused, and nothing is deducted, if the 2027 balance shrank after submission', async () => {
+    prisma.state.balances.push({
+      id: 'bal-2027',
+      employeeId: 'emp-1',
+      leaveTypeId: LT.vacation.id,
+      year: 2027,
+      totalDays: 6,
+      usedDays: 3,
+      remainingDays: 3,
+    });
+    const { id } = await submit(U.emp, LT.vacation, OVER_NEW_YEAR); // 4 + 3 ≥ 6
+    prisma.state.balances.find((b) => b.id === 'bal-2027')!.remainingDays = 1;
+
+    await hrApprove(id);
+    await mgrApprove(id);
+    await expect(ceoApprove(id)).rejects.toThrow(
+      'สิทธิ์วันลาคงเหลือไม่เพียงพอ',
+    );
+
+    // (The fake transaction cannot roll the status change back; the real one does.)
+    expect(vacation2026().remainingDays).toBe(4);
+    expect(deductionsOf(id)).toEqual([]);
+  });
+
+  it('a leave inside one year takes from that year only and records one deduction', async () => {
+    const { id } = await submit(U.emp, LT.vacation); // Oct 2026, 2 days
+    await approveFully(id);
+
+    expect(vacation2026().remainingDays).toBe(2);
+    expect(vacation2027()).toBeUndefined();
+    expect(deductionsOf(id)).toEqual([{ year: 2026, days: 2 }]);
+  });
+
+  it('a leave approved before deductions were recorded is refunded to its start year', async () => {
+    const { id } = await submit(U.emp, LT.vacation);
+    await approveFully(id);
+    prisma.state.deductions.length = 0; // as if approved before the table existed
+
+    await employee.deleteLeaveRequest(U.emp, id);
+    await hrApprove(id);
+
+    expect(vacation2026().remainingDays).toBe(4);
+  });
+});
+
+// =============================================================================
+describe('Leave preview (dry run used by the request form)', () => {
+  const preview = (
+    userId: string,
+    lt: SeedLeaveType,
+    extra: Partial<Parameters<typeof employee.previewLeaveRequest>[1]> = {},
+  ) =>
+    employee.previewLeaveRequest(userId, {
+      leaveTypeId: lt.id,
+      leaveMode: 'full_day',
+      startDate: START,
+      endDate: END,
+      ...extra,
+    });
+
+  it('reports the days a request would use, and creates nothing', async () => {
+    const result = await preview(U.emp, LT.sick);
+
+    expect(result).toEqual({ ok: true, totalDays: 2, message: null });
+    expect(prisma.leaveRequest.create).not.toHaveBeenCalled();
+    expect(prisma.state.leaveRequests).toHaveLength(0);
+    expect(prisma.notification.create).not.toHaveBeenCalled();
+    expect(mail.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('sizes half-day and hourly requests like submitting would', async () => {
+    expect(
+      await preview(U.emp, LT.sick, {
+        leaveMode: 'half_day',
+        period: 'morning',
+        endDate: START,
+      }),
+    ).toEqual({ ok: true, totalDays: 0.5, message: null });
+    expect(
+      await preview(U.emp, LT.sick, {
+        leaveMode: 'hourly',
+        leaveDate: START,
+        startTime: '09:00',
+        endTime: '13:00',
+      }),
+    ).toEqual(expect.objectContaining({ ok: true }));
+  });
+
+  it('says why a request would be refused: not enough days', async () => {
+    build({ balanceOverrides: { 'emp-1': { [LT.sick.id]: 1 } } });
+
+    expect(await preview(U.emp, LT.sick)).toEqual({
+      ok: false,
+      totalDays: null,
+      message: 'สิทธิ์วันลาไม่เพียงพอ (เหลือเพียง 1 วัน)',
+    });
+  });
+
+  it('counts both years for a leave over New Year, and says so when they are not enough', async () => {
+    build({ balanceOverrides: { 'emp-1': { [LT.vacation.id]: 4 } } });
+    const overNewYear = { startDate: '2026-12-29', endDate: '2027-01-05' };
+
+    expect(await preview(U.emp, LT.vacation, overNewYear)).toEqual({
+      ok: true,
+      totalDays: 6,
+      message: null,
+    });
+
+    build({ balanceOverrides: { 'emp-1': { [LT.vacation.id]: 0 } } });
+    expect(await preview(U.emp, LT.vacation, overNewYear)).toEqual(
+      expect.objectContaining({ ok: true }), // 0 + a fresh 6 days in 2027
+    );
+    build({ balanceOverrides: { 'emp-1': { [LT.vacation.id]: 0 } } });
+    expect(
+      await preview(U.emp, LT.vacation, {
+        startDate: '2026-12-29',
+        endDate: '2027-01-12', // 11 working days > 0 + 6
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        ok: false,
+        message: 'สิทธิ์วันลาไม่เพียงพอ (เหลือเพียง 6 วัน)',
+      }),
+    );
+  });
+
+  it.each([
+    [
+      'the CEO files no leave',
+      U.ceo,
+      'ผู้บริหาร (CEO) ไม่ต้องยื่นคำขอลาในระบบ',
+    ],
+    [
+      'incomplete data for the chosen mode',
+      U.emp,
+      'ข้อมูลไม่ครบถ้วนสำหรับรูปแบบการลาที่เลือก',
+    ],
+  ])('turns the rule violation "%s" into ok:false', async (_n, user, msg) => {
+    const result =
+      user === U.emp
+        ? await preview(user, LT.sick, {
+            leaveMode: 'hourly',
+            startDate: undefined,
+            endDate: undefined,
+          })
+        : await preview(user, LT.sick);
+    expect(result).toEqual({ ok: false, totalDays: null, message: msg });
+  });
+
+  it('does not hide errors that are not rule violations', async () => {
+    prisma.leaveBalance.findUnique.mockRejectedValueOnce(new Error('db down'));
+    await expect(preview(U.emp, LT.sick)).rejects.toThrow('db down');
   });
 });

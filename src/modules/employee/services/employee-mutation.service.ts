@@ -3,10 +3,14 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  ConflictException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { initialBalanceTotal } from '../leave-balance.util';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   CreateLeaveRequestDto,
+  PreviewLeaveRequestDto,
   UpdateLeaveRequestDto,
 } from '../dto/employee.dto';
 import { NotificationService } from '../../notification/notification.service';
@@ -17,6 +21,16 @@ import {
   LeavePortionInput,
   DayPortionPlanEntry,
 } from '../leave-portion.util';
+
+/**
+ * Balances are per year and are deducted from the year of the leave's
+ * startDate (approval, cancellation), so every check at submission uses that
+ * same year rather than today's.
+ */
+const leaveYearRange = (year: number) => ({
+  gte: new Date(`${year}-01-01T00:00:00.000Z`),
+  lt: new Date(`${year + 1}-01-01T00:00:00.000Z`),
+});
 
 /** Leave-request write path: create, edit, and cancel, plus the accrual/overlap rules behind them. */
 @Injectable()
@@ -94,7 +108,7 @@ export class EmployeeMutationService {
     leaveTypeId: string;
     leaveTypeName: string;
     calculatedDays: number;
-    currentYear: number;
+    leaveYear: number;
     excludeRequestId?: string;
     throwOnUnspecifiedMaternityGender: boolean;
   }): Promise<{ paidDays: number; unpaidDays: number }> {
@@ -103,7 +117,7 @@ export class EmployeeMutationService {
       leaveTypeId,
       leaveTypeName,
       calculatedDays,
-      currentYear,
+      leaveYear,
       excludeRequestId,
       throwOnUnspecifiedMaternityGender,
     } = params;
@@ -117,7 +131,7 @@ export class EmployeeMutationService {
           employeeId: employee.id,
           leaveTypeId,
           status: { notIn: ['REJECTED', 'Rejected', 'CANCELLED', 'Cancelled'] },
-          startDate: { gte: new Date(`${currentYear}-01-01`) },
+          startDate: leaveYearRange(leaveYear),
           ...(excludeRequestId ? { id: { not: excludeRequestId } } : {}),
         },
         _sum: { paidDays: true },
@@ -189,7 +203,14 @@ export class EmployeeMutationService {
     return { paidDays, unpaidDays };
   }
 
-  async createLeaveRequest(userId: string, dto: CreateLeaveRequestDto) {
+  /**
+   * Validates a new leave request against every rule and sizes it (working
+   * days, paid/unpaid). Shared by createLeaveRequest and previewLeaveRequest,
+   * so what the form shows is exactly what submitting would decide. Writes
+   * nothing; throws BadRequest/Forbidden when the request is not allowed.
+   * Normalises the format fields of `dto` in place.
+   */
+  private async evaluateRequest(userId: string, dto: CreateLeaveRequestDto) {
     const employee = await this.getEmployeeByUserId(userId);
 
     // Business rule: the CEO does not file leave; they only give final approval
@@ -264,13 +285,13 @@ export class EmployeeMutationService {
     });
 
     // Check Leave Balance
-    const currentYear = new Date().getFullYear();
+    const leaveYear = startDate.getFullYear();
     const balance = await this.prisma.leaveBalance.findUnique({
       where: {
         employeeId_leaveTypeId_year: {
           employeeId: employee.id,
           leaveTypeId: dto.leaveTypeId,
-          year: currentYear,
+          year: leaveYear,
         },
       },
       include: {
@@ -315,24 +336,11 @@ export class EmployeeMutationService {
       }
     }
 
-    const pendingLeave = await this.prisma.leaveRequest.aggregate({
-      where: {
-        employeeId: employee.id,
-        leaveTypeId: dto.leaveTypeId,
-        status: {
-          in: [
-            'PENDING_VERIFY',
-            'REVIEWING_HR',
-            'PENDING_SUPERVISOR',
-            'PENDING_EXECUTIVE',
-          ],
-        },
-        startDate: { gte: new Date(`${currentYear}-01-01T00:00:00.000Z`) },
-      },
-      _sum: { totalDays: true },
+    const effectiveRemainingDays = await this.effectiveRemainingDays({
+      employeeId: employee.id,
+      balance,
+      endDate,
     });
-    const pendingDays = pendingLeave._sum.totalDays || 0;
-    const effectiveRemainingDays = balance.remainingDays - pendingDays;
 
     const leaveTypeName = balance.leaveType.name;
     const isMaternityFemale =
@@ -396,42 +404,66 @@ export class EmployeeMutationService {
       leaveTypeId: dto.leaveTypeId,
       leaveTypeName,
       calculatedDays,
-      currentYear,
+      leaveYear,
       throwOnUnspecifiedMaternityGender: true,
     });
 
-    // Generate Leave Request Code: L-{leaveTypeCode}-{sequence}-{buddhistYear}
-    const buddhistYear = new Date().getFullYear() + 543;
-    const leaveTypeCode = balance.leaveType.code;
+    return {
+      employee,
+      startDate,
+      endDate,
+      balance,
+      leaveTypeName,
+      isMaternityFemale,
+      requestedPortion,
+      holidays,
+      calculatedDays,
+      paidDays,
+      unpaidDays,
+    };
+  }
 
-    // Find the highest sequence number for the current Buddhist year
-    const yearStart = new Date(`${buddhistYear - 543}-01-01T00:00:00.000Z`);
-    const yearEnd = new Date(`${buddhistYear - 543 + 1}-01-01T00:00:00.000Z`);
-
-    const allRequests = await this.prisma.leaveRequest.findMany({
-      where: {
-        requestCode: { endsWith: `-${buddhistYear}` },
-        createdAt: { gte: yearStart, lt: yearEnd },
-      },
-      select: { requestCode: true },
+  /**
+   * Dry run of createLeaveRequest for the form: how many days the request
+   * would use, or why it would be refused. Creates nothing. Only rule
+   * violations are reported as `ok: false`; any other error still propagates.
+   */
+  async previewLeaveRequest(userId: string, query: PreviewLeaveRequestDto) {
+    const dto = Object.assign(new CreateLeaveRequestDto(), query, {
+      reason: '',
     });
-
-    let nextSeq = 1;
-    if (allRequests.length > 0) {
-      const maxSeq = allRequests.reduce((max, req) => {
-        if (req.requestCode) {
-          const parts = req.requestCode.split('-');
-          if (parts.length >= 3) {
-            const seq = Number.parseInt(parts[2], 10);
-            if (!Number.isNaN(seq) && seq > max) return seq;
-          }
-        }
-        return max;
-      }, 0);
-      nextSeq = maxSeq + 1;
+    try {
+      const { calculatedDays } = await this.evaluateRequest(userId, dto);
+      return { ok: true, totalDays: calculatedDays, message: null };
+    } catch (e) {
+      if (e instanceof BadRequestException || e instanceof ForbiddenException) {
+        const body = e.getResponse();
+        const message =
+          typeof body === 'string'
+            ? body
+            : [(body as { message?: string | string[] }).message ?? e.message]
+                .flat()
+                .join('\n');
+        return { ok: false, totalDays: null, message };
+      }
+      throw e;
     }
+  }
 
-    const requestCode = `L-${leaveTypeCode}-${String(nextSeq).padStart(5, '0')}-${buddhistYear}`;
+  async createLeaveRequest(userId: string, dto: CreateLeaveRequestDto) {
+    const {
+      employee,
+      startDate,
+      endDate,
+      balance,
+      leaveTypeName,
+      isMaternityFemale,
+      requestedPortion,
+      holidays,
+      calculatedDays,
+      paidDays,
+      unpaidDays,
+    } = await this.evaluateRequest(userId, dto);
 
     // ทุกคำขอลาเริ่มที่ PENDING_VERIFY เพื่อให้ HR ตรวจสอบก่อนเสมอ
     // Flow: PENDING_VERIFY → (HR) → PENDING_SUPERVISOR → (Manager) → APPROVED (ลาทั่วไป)
@@ -443,48 +475,55 @@ export class EmployeeMutationService {
     // on their existing leaves, then re-run the portion conflict check inside the
     // transaction so two requests submitted at the same time cannot both claim
     // the same half-day slot (race condition guard).
-    const leaveRequest = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM leaverequest WHERE employeeId = ${employee.id} FOR UPDATE`;
-      const freshExisting = await tx.leaveRequest.findMany({
-        where: {
-          employeeId: employee.id,
-          status: { notIn: BLOCKING_EXCLUDED_STATUSES },
-        },
-        include: { days: true },
-      });
-      // Re-plan inside the row-locked transaction so two requests submitted
-      // at the same time cannot both claim the same half-day slot; also
-      // gives us the exact day/portion breakdown to persist.
-      const freshPlan = this.planPortionsOrThrow(
-        requestedPortion,
-        this.toPortionInputs(freshExisting),
-        holidays.map((h) => h.date),
-        isMaternityFemale,
-      );
-
-      return tx.leaveRequest.create({
-        data: {
-          requestCode,
-          employeeId: employee.id,
-          leaveTypeId: dto.leaveTypeId,
-          startDate: startDate,
-          endDate: endDate,
-          startFormat: dto.startFormat || 'full',
-          endFormat: dto.endFormat || 'full',
-          totalDays: calculatedDays,
-          paidDays: paidDays,
-          unpaidDays: unpaidDays,
-          reason: dto.reason,
-          status: initialStatus,
-          days: {
-            create: freshPlan.days.map((d) => ({
-              date: new Date(`${d.date}T00:00:00.000Z`),
-              portion: d.portion,
-            })),
+    // The request code (L-{type}-{seq}-{year}) is generated inside the
+    // transaction, and the whole transaction is retried when another employee
+    // took the same sequence first: the row lock above is per employee, so it
+    // cannot serialize the shared counter. The unique index is the final guard.
+    const leaveRequest = await this.createWithUniqueRequestCode(
+      balance.leaveType.code,
+      async (tx, requestCode) => {
+        await tx.$queryRaw`SELECT id FROM leaverequest WHERE employeeId = ${employee.id} FOR UPDATE`;
+        const freshExisting = await tx.leaveRequest.findMany({
+          where: {
+            employeeId: employee.id,
+            status: { notIn: BLOCKING_EXCLUDED_STATUSES },
           },
-        },
-      });
-    });
+          include: { days: true },
+        });
+        // Re-plan inside the row-locked transaction so two requests submitted
+        // at the same time cannot both claim the same half-day slot; also
+        // gives us the exact day/portion breakdown to persist.
+        const freshPlan = this.planPortionsOrThrow(
+          requestedPortion,
+          this.toPortionInputs(freshExisting),
+          holidays.map((h) => h.date),
+          isMaternityFemale,
+        );
+
+        return tx.leaveRequest.create({
+          data: {
+            requestCode,
+            employeeId: employee.id,
+            leaveTypeId: dto.leaveTypeId,
+            startDate: startDate,
+            endDate: endDate,
+            startFormat: dto.startFormat || 'full',
+            endFormat: dto.endFormat || 'full',
+            totalDays: calculatedDays,
+            paidDays: paidDays,
+            unpaidDays: unpaidDays,
+            reason: dto.reason,
+            status: initialStatus,
+            days: {
+              create: freshPlan.days.map((d) => ({
+                date: new Date(`${d.date}T00:00:00.000Z`),
+                portion: d.portion,
+              })),
+            },
+          },
+        });
+      },
+    );
 
     // Notify Approver(s)
     try {
@@ -730,13 +769,13 @@ export class EmployeeMutationService {
         },
       });
 
-      const currentYear = new Date().getFullYear();
+      const leaveYear = newStartDate.getFullYear();
       const balance = await this.prisma.leaveBalance.findUnique({
         where: {
           employeeId_leaveTypeId_year: {
             employeeId: owner.id,
             leaveTypeId: request.leaveTypeId,
-            year: currentYear,
+            year: leaveYear,
           },
         },
         include: {
@@ -833,25 +872,12 @@ export class EmployeeMutationService {
         );
       }
 
-      const pendingLeave = await this.prisma.leaveRequest.aggregate({
-        where: {
-          employeeId: owner.id,
-          leaveTypeId: request.leaveTypeId,
-          status: {
-            in: [
-              'PENDING_VERIFY',
-              'REVIEWING_HR',
-              'PENDING_SUPERVISOR',
-              'PENDING_EXECUTIVE',
-            ],
-          },
-          startDate: { gte: new Date(`${currentYear}-01-01T00:00:00.000Z`) },
-          id: { not: requestId },
-        },
-        _sum: { totalDays: true },
+      const effectiveRemainingDays = await this.effectiveRemainingDays({
+        employeeId: owner.id,
+        balance,
+        endDate: newEndDate,
+        excludeRequestId: requestId,
       });
-      const pendingDays = pendingLeave._sum.totalDays || 0;
-      const effectiveRemainingDays = balance.remainingDays - pendingDays;
 
       if (effectiveRemainingDays < calculatedDays) {
         throw new BadRequestException(
@@ -864,7 +890,7 @@ export class EmployeeMutationService {
         leaveTypeId: request.leaveTypeId,
         leaveTypeName,
         calculatedDays,
-        currentYear,
+        leaveYear,
         excludeRequestId: requestId,
         throwOnUnspecifiedMaternityGender: false,
       });
@@ -967,6 +993,129 @@ export class EmployeeMutationService {
     }
 
     return updatedRequest;
+  }
+
+  /**
+   * Days a leave starting in `balance.year` can still draw on, after the
+   * requests already waiting for approval. A leave that runs into the next
+   * year may also use that year's balance (see deductLeaveBalance); if HR has
+   * not created it yet, it will be created at approval with its standard
+   * starting total, so that total counts here.
+   */
+  private async effectiveRemainingDays(params: {
+    employeeId: string;
+    balance: {
+      year: number;
+      remainingDays: number;
+      leaveTypeId: string;
+      leaveType: { name: string; defaultDays: number };
+    };
+    endDate: Date;
+    excludeRequestId?: string;
+  }): Promise<number> {
+    const { employeeId, balance, endDate, excludeRequestId } = params;
+    const startYear = balance.year;
+    const endYear = endDate.getFullYear();
+    if (endYear > startYear + 1) {
+      throw new BadRequestException(
+        'ไม่สามารถยื่นลาคร่อมเกิน 2 ปีปฏิทินติดกันได้ กรุณาแบ่งเป็นหลายใบลา',
+      );
+    }
+
+    const pendingIn = async (year: number) => {
+      const pending = await this.prisma.leaveRequest.aggregate({
+        where: {
+          employeeId,
+          leaveTypeId: balance.leaveTypeId,
+          status: {
+            in: [
+              'PENDING_VERIFY',
+              'REVIEWING_HR',
+              'PENDING_SUPERVISOR',
+              'PENDING_EXECUTIVE',
+            ],
+          },
+          startDate: leaveYearRange(year),
+          ...(excludeRequestId ? { id: { not: excludeRequestId } } : {}),
+        },
+        _sum: { totalDays: true },
+      });
+      return pending._sum.totalDays || 0;
+    };
+
+    const startAvailable = balance.remainingDays - (await pendingIn(startYear));
+    if (endYear === startYear) return startAvailable;
+
+    const next = await this.prisma.leaveBalance.findUnique({
+      where: {
+        employeeId_leaveTypeId_year: {
+          employeeId,
+          leaveTypeId: balance.leaveTypeId,
+          year: endYear,
+        },
+      },
+    });
+    // The start year is used up first, so a new next-year balance carries
+    // nothing over (same order as at approval).
+    const nextAvailable = next
+      ? next.remainingDays - (await pendingIn(endYear))
+      : initialBalanceTotal(balance.leaveType, 0);
+    return Math.max(0, startAvailable) + Math.max(0, nextAvailable);
+  }
+
+  /** Next `L-{typeCode}-{seq 5 digits}-{buddhist year}`, read through `db` (a transaction client). */
+  private async nextRequestCode(
+    db: Prisma.TransactionClient,
+    leaveTypeCode: string,
+  ): Promise<string> {
+    const year = new Date().getFullYear();
+    const buddhistYear = year + 543;
+    const existing = await db.leaveRequest.findMany({
+      where: {
+        requestCode: { endsWith: `-${buddhistYear}` },
+        createdAt: {
+          gte: new Date(`${year}-01-01T00:00:00.000Z`),
+          lt: new Date(`${year + 1}-01-01T00:00:00.000Z`),
+        },
+      },
+      select: { requestCode: true },
+    });
+    const maxSeq = existing.reduce((max, req) => {
+      const seq = Number.parseInt(req.requestCode?.split('-')[2] ?? '', 10);
+      return Number.isNaN(seq) ? max : Math.max(max, seq);
+    }, 0);
+    return `L-${leaveTypeCode}-${String(maxSeq + 1).padStart(5, '0')}-${buddhistYear}`;
+  }
+
+  private isRequestCodeCollision(e: unknown): boolean {
+    return (
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      e.code === 'P2002' &&
+      JSON.stringify(e.meta?.target ?? '').includes('requestCode')
+    );
+  }
+
+  /**
+   * Runs `create` in a transaction with a freshly computed request code and
+   * retries with a new code when the unique index reports a collision.
+   */
+  private async createWithUniqueRequestCode<T>(
+    leaveTypeCode: string,
+    create: (tx: Prisma.TransactionClient, requestCode: string) => Promise<T>,
+  ): Promise<T> {
+    const maxAttempts = 5;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.prisma.$transaction(async (tx) =>
+          create(tx, await this.nextRequestCode(tx, leaveTypeCode)),
+        );
+      } catch (e) {
+        if (!this.isRequestCodeCollision(e)) throw e;
+      }
+    }
+    throw new ConflictException(
+      'ระบบกำลังมีผู้ยื่นคำขอลาจำนวนมาก ไม่สามารถออกเลขที่คำขอได้ กรุณาลองใหม่อีกครั้ง',
+    );
   }
 
   private async getEmployeeByUserId(userId: string) {

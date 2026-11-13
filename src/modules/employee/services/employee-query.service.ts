@@ -12,6 +12,7 @@ import {
   LeavePortionInput,
   DayHalf,
 } from '../leave-portion.util';
+import { isApprovedStatus, isRejectedStatus } from 'src/common/leave-status';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -346,7 +347,7 @@ export class EmployeeQueryService {
     const approvedThisYear = await this.prisma.leaveRequest.count({
       where: {
         employeeId: employee.id,
-        status: { contains: 'Approved' },
+        status: 'APPROVED',
         startDate: {
           gte: new Date(`${currentYear}-01-01T00:00:00.000Z`),
           lt: new Date(`${currentYear + 1}-01-01T00:00:00.000Z`),
@@ -357,14 +358,14 @@ export class EmployeeQueryService {
     const rejectedRequests = await this.prisma.leaveRequest.count({
       where: {
         employeeId: employee.id,
-        status: { contains: 'Rejected' },
+        status: 'REJECTED',
       },
     });
 
     const approvedLeaves = await this.prisma.leaveRequest.findMany({
       where: {
         employeeId: employee.id,
-        status: { contains: 'Approved' },
+        status: 'APPROVED',
         startDate: {
           gte: new Date(`${currentYear}-01-01T00:00:00.000Z`),
           lt: new Date(`${currentYear + 1}-01-01T00:00:00.000Z`),
@@ -408,10 +409,10 @@ export class EmployeeQueryService {
     const activities = recentLeaves.map((r) => {
       let color = 'bg-orange-400';
       let statusText = 'ส่งคำขอแล้ว';
-      if (r.status.includes('Approved')) {
+      if (isApprovedStatus(r.status)) {
         color = 'bg-emerald-400';
         statusText = 'อนุมัติแล้ว';
-      } else if (r.status.includes('Rejected')) {
+      } else if (isRejectedStatus(r.status)) {
         color = 'bg-red-400';
         statusText = 'ไม่อนุมัติ';
       }

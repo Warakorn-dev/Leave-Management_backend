@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { isApprovedStatus, isRejectedStatus } from 'src/common/leave-status';
 import {
   expandLeaveHalves,
   normalizePortion,
@@ -108,7 +109,7 @@ export class HrDashboardService {
 
     const leavesTodayCount = await this.prisma.leaveRequest.count({
       where: {
-        status: { contains: 'Approved' },
+        status: 'APPROVED',
         startDate: { lte: tomorrow },
         endDate: { gte: today },
       },
@@ -116,7 +117,7 @@ export class HrDashboardService {
 
     const monthlyStatsRaw = await this.prisma.leaveRequest.findMany({
       where: {
-        status: { contains: 'Approved' },
+        status: 'APPROVED',
         startDate: {
           gte: new Date(`${currentYear}-01-01`),
           lt: new Date(`${currentYear + 1}-01-01`),
@@ -158,10 +159,10 @@ export class HrDashboardService {
     const formattedActivities = activities.map((r) => {
       let color = 'bg-orange-400';
       let statusText = 'ส่งคำขอแล้ว';
-      if (r.status.includes('Approved')) {
+      if (isApprovedStatus(r.status)) {
         color = 'bg-emerald-400';
         statusText = 'อนุมัติแล้ว';
-      } else if (r.status.includes('Rejected')) {
+      } else if (isRejectedStatus(r.status)) {
         color = 'bg-red-400';
         statusText = 'ไม่อนุมัติ';
       }
@@ -199,11 +200,11 @@ export class HrDashboardService {
       ).length;
       personalApproved = employee.leaveRequests.filter(
         (r) =>
-          r.status.includes('Approved') &&
+          isApprovedStatus(r.status) &&
           new Date(r.startDate).getFullYear() === currentYear,
       ).length;
       personalRejected = employee.leaveRequests.filter((r) =>
-        r.status.includes('Rejected'),
+        isRejectedStatus(r.status),
       ).length;
     }
 
@@ -263,7 +264,7 @@ export class HrDashboardService {
         },
         leaveRequests: {
           where: {
-            status: { contains: 'Approved' },
+            status: 'APPROVED',
             // Any leave overlapping the range; partial overlaps are clipped below.
             ...(fromKey
               ? { endDate: { gte: new Date(`${fromKey}T00:00:00.000Z`) } }

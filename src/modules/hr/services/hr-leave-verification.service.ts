@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationService } from '../../notification/notification.service';
+import { refundLeaveBalance } from '../../employee/leave-balance.util';
 import {
   isDepartmentApprover,
   isLeaderPosition,
@@ -322,26 +323,7 @@ export class HrLeaveVerificationService {
           });
 
           if (action === 'Approve' && wasApproved) {
-            const balance = await prisma.leaveBalance.findFirst({
-              where: {
-                employeeId: request.employeeId,
-                leaveTypeId: request.leaveTypeId,
-                year: new Date(request.startDate).getFullYear(),
-              },
-            });
-            if (balance) {
-              const newRemainingDays = Math.min(
-                balance.totalDays,
-                balance.remainingDays + request.totalDays,
-              );
-              await prisma.leaveBalance.update({
-                where: { id: balance.id },
-                data: {
-                  usedDays: Math.max(0, balance.totalDays - newRemainingDays),
-                  remainingDays: newRemainingDays,
-                },
-              });
-            }
+            await refundLeaveBalance(prisma, request);
           }
           return updatedRequest;
         })

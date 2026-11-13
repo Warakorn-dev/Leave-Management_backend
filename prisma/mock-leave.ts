@@ -28,7 +28,7 @@ async function main() {
             endDate: new Date('2024-05-11T00:00:00Z'),
             totalDays: 2,
             reason: 'ไข้หวัดใหญ่ ต้องพักผ่อนตามแพทย์สั่ง',
-            status: 'Approved',
+            status: 'APPROVED',
         },
         {
             employeeId: employee.id,
@@ -37,7 +37,7 @@ async function main() {
             endDate: new Date('2024-12-27T00:00:00Z'),
             totalDays: 3,
             reason: 'พักผ่อนปลายปี',
-            status: 'Pending',
+            status: 'PENDING_VERIFY',
         },
         {
             employeeId: employee.id,
@@ -46,7 +46,7 @@ async function main() {
             endDate: new Date('2024-02-14T00:00:00Z'),
             totalDays: 1,
             reason: 'อาหารเป็นพิษ',
-            status: 'Rejected',
+            status: 'REJECTED',
         }
     ];
 

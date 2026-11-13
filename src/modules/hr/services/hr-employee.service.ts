@@ -12,6 +12,7 @@ import {
 } from '../dto/hr.dto';
 import * as bcrypt from 'bcrypt';
 import { roleChangeSignOut } from '../../../common/role-change';
+import { initialBalanceTotal } from '../../employee/leave-balance.util';
 import {
   assertHrAssignableRole,
   assertNotAdminAccount,
@@ -347,18 +348,11 @@ export class HrEmployeeService {
         (b) => b.leaveTypeId === type.id,
       );
 
-      let initialTotalDays = type.defaultDays;
-
-      // Special logic for vacation carry-over (max 12 days)
-      if (type.name.includes('พักผ่อน') || type.name.includes('พักร้อน')) {
-        const prevBalance = prevYearBalances.find(
-          (b) => b.leaveTypeId === type.id,
-        );
-        if (prevBalance) {
-          const carriedOver = prevBalance.remainingDays;
-          initialTotalDays = Math.min(12, carriedOver + type.defaultDays);
-        }
-      }
+      // Vacation carries the previous year's remaining days over (max 12).
+      const initialTotalDays = initialBalanceTotal(
+        type,
+        prevYearBalances.find((b) => b.leaveTypeId === type.id)?.remainingDays,
+      );
 
       if (!existingBalance) {
         const balance = await this.prisma.leaveBalance.create({

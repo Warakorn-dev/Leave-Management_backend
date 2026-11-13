@@ -5,6 +5,7 @@ import {
   IsArray,
   ValidateNested,
   IsNotEmpty,
+  Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -43,10 +44,12 @@ export class UpdateSettingsDto {
 export class PaginationDto {
   @ApiPropertyOptional()
   @IsOptional()
+  @Matches(/^[1-9]\d{0,5}$/)
   page?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Matches(/^([1-9]\d?|100)$/) // 1-100 rows per page
   limit?: string;
 
   @ApiPropertyOptional()

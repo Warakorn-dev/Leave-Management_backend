@@ -7,6 +7,8 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ProcessLeaveRequestDto } from './dto/manager.dto';
 import { NotificationService } from '../notification/notification.service';
+import { deductLeaveBalance } from '../employee/leave-balance.util';
+import { isApprovedStatus } from 'src/common/leave-status';
 import {
   isLeaderPosition,
   leaveHistoryUrlForRole,
@@ -164,35 +166,8 @@ export class ManagerService {
 
         // 3. Deduct Leave Balance if Manager Approves and status is final APPROVED
         if (nextStatus === 'APPROVED') {
-          const currentYear = new Date(request.startDate).getFullYear();
-          const leaveBalance = await prisma.leaveBalance.findFirst({
-            where: {
-              employeeId: request.employeeId,
-              leaveTypeId: request.leaveTypeId,
-              year: currentYear,
-            },
-          });
-
-          if (leaveBalance) {
-            // Use the available balance directly because HR can adjust it
-            // manually; usedDays may otherwise be out of sync.
-            const newRemainingDays =
-              leaveBalance.remainingDays - request.totalDays;
-
-            if (newRemainingDays < 0) {
-              throw new BadRequestException('สิทธิ์วันลาคงเหลือไม่เพียงพอ');
-            }
-
-            const newUsedDays = leaveBalance.totalDays - newRemainingDays;
-
-            await prisma.leaveBalance.update({
-              where: { id: leaveBalance.id },
-              data: {
-                usedDays: newUsedDays,
-                remainingDays: newRemainingDays,
-              },
-            });
-          }
+          // remainingDays is the authoritative balance (HR can adjust it by hand).
+          await deductLeaveBalance(prisma, request);
         }
 
         return updatedRequest;
@@ -363,7 +338,7 @@ export class ManagerService {
 
     const leavesTodayCount = await this.prisma.leaveRequest.count({
       where: {
-        status: { contains: 'Approved' },
+        status: 'APPROVED',
         startDate: { lte: tomorrow },
         endDate: { gte: today },
         employee: { departmentId: manager.departmentId },
@@ -372,7 +347,7 @@ export class ManagerService {
 
     const monthlyStatsRaw = await this.prisma.leaveRequest.findMany({
       where: {
-        status: { contains: 'Approved' },
+        status: 'APPROVED',
         startDate: {
           gte: new Date(`${currentYear}-01-01`),
           lt: new Date(`${currentYear + 1}-01-01`),
@@ -427,7 +402,7 @@ export class ManagerService {
       activities: activities.map((req) => {
         let type = 'leave';
         let title = `${req.employee?.firstName || 'พนักงาน'} ส่งคำขอ${req.leaveType?.name || 'ลา'} ${req.totalDays || 1} วัน`;
-        if (req.status === 'Approved') {
+        if (isApprovedStatus(req.status)) {
           type = 'approve';
           title = `หัวหน้าอนุมัติการลาของ ${req.employee?.firstName || 'พนักงาน'}`;
         }

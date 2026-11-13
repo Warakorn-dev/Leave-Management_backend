@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
+import { deductLeaveBalance } from '../employee/leave-balance.util';
 import { leaveHistoryUrlForRole } from '../notification/leave-history-url';
 
 @Injectable()
@@ -45,7 +46,10 @@ export class CeoService {
     const leavesToday = await this.prisma.leaveRequest.count({
       where: {
         status: 'APPROVED',
-        startDate: { lte: today },
+        // Dates are stored at UTC midnight, which is after local midnight
+        // (`today`) in Asia/Bangkok, so `startDate <= today` would miss a
+        // leave that starts today. Compare against the whole local day.
+        startDate: { lt: tomorrow },
         endDate: { gte: today },
       },
     });
@@ -89,7 +93,10 @@ export class CeoService {
 
     if (employee) {
       const vacationBalance = employee.leaveBalances.find(
-        (b) => b.leaveType.name === 'ลาพักร้อน',
+        (b) =>
+          b.year === currentYear &&
+          (b.leaveType.name.includes('พักผ่อน') ||
+            b.leaveType.name.includes('พักร้อน')),
       );
       remainingVacation = vacationBalance?.remainingDays || 0;
 
@@ -180,7 +187,10 @@ export class CeoService {
     const leavesToday = await this.prisma.leaveRequest.count({
       where: {
         status: 'APPROVED',
-        startDate: { lte: today },
+        // Dates are stored at UTC midnight, which is after local midnight
+        // (`today`) in Asia/Bangkok, so `startDate <= today` would miss a
+        // leave that starts today. Compare against the whole local day.
+        startDate: { lt: tomorrow },
         endDate: { gte: today },
       },
     });
@@ -390,40 +400,10 @@ export class CeoService {
           action === 'Approve' &&
           request.status === 'PENDING_EXECUTIVE'
         ) {
-          const currentYear = new Date(request.startDate).getFullYear();
-          const leaveBalance = await prisma.leaveBalance.findFirst({
-            where: {
-              employeeId: request.employeeId,
-              leaveTypeId: request.leaveTypeId,
-              year: currentYear,
-            },
-          });
-
-          if (leaveBalance) {
-            // If the request was already created, the balance was NOT deducted during creation.
-            // Wait, is balance deducted during creation?
-            // The employee.service.ts createLeaveRequest does NOT deduct balance! It only validates.
-            // So we must deduct it here.
-            // remainingDays is the authoritative available balance. HR can adjust
-            // it manually, so recalculating it from totalDays and usedDays can use
-            // stale data and incorrectly reject a valid CEO approval.
-            const newRemainingDays =
-              leaveBalance.remainingDays - request.totalDays;
-
-            if (newRemainingDays < 0) {
-              throw new BadRequestException('สิทธิ์วันลาคงเหลือไม่เพียงพอ');
-            }
-
-            const newUsedDays = leaveBalance.totalDays - newRemainingDays;
-
-            await prisma.leaveBalance.update({
-              where: { id: leaveBalance.id },
-              data: {
-                usedDays: newUsedDays,
-                remainingDays: newRemainingDays,
-              },
-            });
-          }
+          // The balance is not deducted at creation, only here. remainingDays
+          // is the authoritative balance (HR can adjust it by hand), see
+          // deductLeaveBalance.
+          await deductLeaveBalance(prisma, request);
         }
 
         return updated;

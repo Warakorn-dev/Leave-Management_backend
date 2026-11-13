@@ -81,6 +81,49 @@ export class CreateLeaveRequestDto {
   reason: string;
 }
 
+/** Query of GET /leave/preview: the fields of a new request, without the reason. */
+export class PreviewLeaveRequestDto {
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  leaveTypeId: string;
+
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  leaveMode: string;
+
+  @ApiPropertyOptional()
+  @IsDateString()
+  @IsOptional()
+  startDate?: string;
+
+  @ApiPropertyOptional()
+  @IsDateString()
+  @IsOptional()
+  endDate?: string;
+
+  @ApiPropertyOptional()
+  @IsDateString()
+  @IsOptional()
+  leaveDate?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  startTime?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  endTime?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  period?: string;
+}
+
 export class UpdateLeaveRequestDto {
   @ApiPropertyOptional()
   @IsDateString()

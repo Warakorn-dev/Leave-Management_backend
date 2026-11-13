@@ -37,6 +37,48 @@ export function generateTempPassword(): string {
   return out;
 }
 
+/**
+ * The only settings the app reads, with the values it can actually use. A bad
+ * value is not harmless: a JWT_EXPIRATION jsonwebtoken rejects breaks every
+ * login and refresh, and a non-numeric MAX_FAILED_LOGINS silently turns the
+ * lockout off.
+ */
+const integerSetting =
+  (min: number, max: number, unit: string) => (value: string) =>
+    /^\d{1,6}$/.test(value) && +value >= min && +value <= max
+      ? null
+      : `ต้องเป็นจำนวนเต็ม ${min}-${max} ${unit}`;
+
+const SETTING_RULES: Record<string, (value: string) => string | null> = {
+  MAX_FAILED_LOGINS: integerSetting(1, 20, 'ครั้ง'),
+  LOCKOUT_DURATION_MINUTES: integerSetting(1, 1440, 'นาที'),
+  IDLE_TIMEOUT_MINUTES: integerSetting(1, 1440, 'นาที'),
+  JWT_EXPIRATION: (value) =>
+    /^[1-9]\d{0,3}[mhd]$/.test(value)
+      ? null
+      : 'ต้องเป็นตัวเลขตามด้วยหน่วย m, h หรือ d เช่น 15m, 1h, 7d',
+};
+
+export function assertValidSetting(key: string, value: string): void {
+  const rule = Object.hasOwn(SETTING_RULES, key) ? SETTING_RULES[key] : null;
+  if (!rule) {
+    throw new BadRequestException(`ไม่รองรับการตั้งค่า "${key}"`);
+  }
+  const problem = rule(value);
+  if (problem) {
+    throw new BadRequestException(`ค่าของ ${key} ไม่ถูกต้อง: ${problem}`);
+  }
+}
+
+/**
+ * One CSV cell. Quotes are doubled, and a value a spreadsheet would read as a
+ * formula (starts with = + - @ or a control character) is prefixed with `'`.
+ */
+export function csvCell(value: string): string {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
 @Injectable()
 export class AdminService {
   constructor(private prisma: PrismaService) {}
@@ -348,13 +390,19 @@ export class AdminService {
   }
 
   async updateSettings(dto: UpdateSettingsDto) {
-    for (const setting of dto.settings) {
-      await this.prisma.adminSetting.upsert({
-        where: { key: setting.key },
-        update: { value: setting.value },
-        create: { key: setting.key, value: setting.value },
-      });
+    // Validate everything first so a bad value never half-applies the rest.
+    for (const { key, value } of dto.settings) {
+      assertValidSetting(key, value);
     }
+    await this.prisma.$transaction(
+      dto.settings.map((setting) =>
+        this.prisma.adminSetting.upsert({
+          where: { key: setting.key },
+          update: { value: setting.value },
+          create: { key: setting.key, value: setting.value },
+        }),
+      ),
+    );
     const updated = await this.prisma.adminSetting.findMany();
     return { message: 'บันทึกการตั้งค่าเรียบร้อยแล้ว', data: updated };
   }
@@ -409,12 +457,12 @@ export class AdminService {
       log.entityId || '-',
       log.ipAddress || '-',
       log.createdAt.toISOString(),
-      (log.details || '').replace(/"/g, '""'), // Escape quotes for CSV
+      log.details || '',
     ]);
 
     const csvContent = [
       header.join(','),
-      ...rows.map((r) => r.map((cell) => `"${cell}"`).join(',')),
+      ...rows.map((r) => r.map(csvCell).join(',')),
     ].join('\n');
 
     return csvContent;

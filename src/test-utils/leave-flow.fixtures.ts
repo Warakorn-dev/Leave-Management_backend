@@ -74,6 +74,11 @@ export interface BalanceRow {
   usedDays: number;
   remainingDays: number;
 }
+export interface DeductionRow {
+  leaveRequestId: string;
+  leaveBalanceId: string;
+  days: number;
+}
 export interface NotificationRow {
   userId: string;
   title: string;
@@ -234,6 +239,7 @@ export function createFakePrisma(
     leaveRequests: [] as LeaveRow[],
     approvals: [] as ApprovalRow[],
     balances: [] as BalanceRow[],
+    deductions: [] as DeductionRow[],
     notifications: [] as NotificationRow[],
   };
 
@@ -521,6 +527,73 @@ export function createFakePrisma(
           const b = state.balances.find((x) => x.id === where.id)!;
           Object.assign(b, data);
           return { ...b };
+        },
+      ),
+      findFirstOrThrow: jest.fn(
+        async ({ where }: { where?: Record<string, unknown> } = {}) => {
+          const b = state.balances.find((x) =>
+            matchWhere(x as unknown as Record<string, unknown>, where),
+          );
+          if (!b) throw new Error('balance not found');
+          return { ...b };
+        },
+      ),
+      createMany: jest.fn(
+        async ({
+          data,
+          skipDuplicates,
+        }: {
+          data: Omit<BalanceRow, 'id'>[];
+          skipDuplicates?: boolean;
+        }) => {
+          let count = 0;
+          for (const d of data) {
+            const dup = state.balances.some(
+              (x) =>
+                x.employeeId === d.employeeId &&
+                x.leaveTypeId === d.leaveTypeId &&
+                x.year === d.year,
+            );
+            if (dup) {
+              if (skipDuplicates) continue;
+              throw new Error('unique constraint');
+            }
+            state.balances.push({ id: `bal-${++bal}`, ...d });
+            count++;
+          }
+          return { count };
+        },
+      ),
+    },
+    leaveType: {
+      findUniqueOrThrow: jest.fn(
+        async ({ where }: { where: { id: string } }) => {
+          const t = leaveTypes.find((x) => x.id === where.id);
+          if (!t) throw new Error('leave type not found');
+          return { ...t };
+        },
+      ),
+    },
+    leaveBalanceDeduction: {
+      create: jest.fn(async ({ data }: { data: DeductionRow }) => {
+        state.deductions.push({ ...data });
+        return { ...data };
+      }),
+      findMany: jest.fn(
+        async ({ where }: { where?: Record<string, unknown> } = {}) =>
+          state.deductions
+            .filter((d) =>
+              matchWhere(d as unknown as Record<string, unknown>, where),
+            )
+            .map((d) => ({ ...d })),
+      ),
+      deleteMany: jest.fn(
+        async ({ where }: { where?: Record<string, unknown> } = {}) => {
+          const before = state.deductions.length;
+          state.deductions = state.deductions.filter(
+            (d) => !matchWhere(d as unknown as Record<string, unknown>, where),
+          );
+          return { count: before - state.deductions.length };
         },
       ),
     },

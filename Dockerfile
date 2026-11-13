@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 # Create app directory
 WORKDIR /app
@@ -19,7 +19,7 @@ RUN npx prisma generate
 # Build the application
 RUN npm run build
 
-FROM node:20-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 ENV NODE_ENV=production

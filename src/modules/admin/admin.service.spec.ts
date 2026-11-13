@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { AdminService, generateTempPassword } from './admin.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AdminService, csvCell, generateTempPassword } from './admin.service';
+import { PaginationDto } from './dto/admin.dto';
+import { BadRequestException } from '@nestjs/common';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
 import * as bcrypt from 'bcrypt';
 
 describe('AdminService', () => {
@@ -275,5 +279,103 @@ describe('Business rule — there is always at least one active Admin', () => {
       admin.updateRole('me', 'emp', { roleId: 'role-Nope' }),
     ).rejects.toThrow('ไม่พบสิทธิ์ที่เลือก');
     expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('AdminService settings validation', () => {
+  const build = () => {
+    const prisma = {
+      adminSetting: {
+        upsert: jest.fn((args: unknown) => Promise.resolve(args)),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+    };
+    return { prisma, admin: new AdminService(prisma as never) };
+  };
+
+  it('saves valid values in one transaction', async () => {
+    const { prisma, admin } = build();
+    await admin.updateSettings({
+      settings: [
+        { key: 'MAX_FAILED_LOGINS', value: '5' },
+        { key: 'LOCKOUT_DURATION_MINUTES', value: '15' },
+        { key: 'IDLE_TIMEOUT_MINUTES', value: '60' },
+        { key: 'JWT_EXPIRATION', value: '1h' },
+      ],
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.adminSetting.upsert).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
+    ['JWT_EXPIRATION', 'abc'],
+    ['JWT_EXPIRATION', '60'], // jsonwebtoken reads a bare number as milliseconds
+    ['MAX_FAILED_LOGINS', 'abc'],
+    ['MAX_FAILED_LOGINS', '0'],
+    ['LOCKOUT_DURATION_MINUTES', '-5'],
+    ['IDLE_TIMEOUT_MINUTES', '99999'],
+  ])('refuses %s = %s and writes nothing', async (key, value) => {
+    const { prisma, admin } = build();
+    await expect(
+      admin.updateSettings({
+        settings: [
+          { key: 'MAX_FAILED_LOGINS', value: '5' }, // valid, must not be applied
+          { key, value },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.adminSetting.upsert).not.toHaveBeenCalled();
+  });
+
+  it('refuses a setting the app never reads', async () => {
+    const { admin } = build();
+    await expect(
+      admin.updateSettings({ settings: [{ key: 'ANYTHING', value: '1' }] }),
+    ).rejects.toThrow('ไม่รองรับการตั้งค่า "ANYTHING"');
+    await expect(
+      admin.updateSettings({ settings: [{ key: 'constructor', value: '1' }] }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('CSV export cells', () => {
+  it('doubles quotes and wraps the value', () => {
+    expect(csvCell('say "hi"')).toBe('"say ""hi"""');
+  });
+
+  it.each(['=1+1', '+SUM(A1)', '-2', '@cmd', '\tx'])(
+    'neutralises the formula-looking value %j',
+    (value) => {
+      expect(csvCell(value)).toBe(`"'${value}"`);
+    },
+  );
+
+  it('leaves ordinary text alone', () => {
+    expect(csvCell('LOGIN')).toBe('"LOGIN"');
+  });
+});
+
+describe('Pagination query validation', () => {
+  const errorsFor = (query: Partial<Record<string, string>>) =>
+    validate(plainToInstance(PaginationDto, query));
+
+  it.each([{}, { page: '1', limit: '10' }, { page: '12', limit: '100' }])(
+    'accepts %j',
+    async (query) => {
+      expect(await errorsFor(query)).toHaveLength(0);
+    },
+  );
+
+  it.each([
+    { limit: 'abc' },
+    { limit: '0' },
+    { limit: '101' },
+    { limit: '1000000' },
+    { page: '0' },
+    { page: '-1' },
+    { page: 'x' },
+  ])('refuses %j', async (query) => {
+    expect((await errorsFor(query)).length).toBeGreaterThan(0);
   });
 });

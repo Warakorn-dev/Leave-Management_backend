@@ -226,17 +226,17 @@ async function main() {
       }
     });
 
-    if (approverId && (status === 'Approved' || status === 'Rejected')) {
+    if (approverId && (status === 'APPROVED' || status === 'REJECTED')) {
       await prisma.leaveApproval.create({
         data: {
           leaveRequestId: req.id,
           approverId,
           status,
-          comment: status === 'Approved' ? 'อนุมัติเรียบร้อยครับ' : 'ไม่อนุมัติเนื่องจากงานโปรเจกต์กำลังเร่งรัด',
+          comment: status === 'APPROVED' ? 'อนุมัติเรียบร้อยครับ' : 'ไม่อนุมัติเนื่องจากงานโปรเจกต์กำลังเร่งรัด',
         }
       });
       // Deduct balance if approved
-      if (status === 'Approved') {
+      if (status === 'APPROVED') {
         const bal = await prisma.leaveBalance.findFirst({
           where: { employeeId: empId, leaveTypeId: lt.id, year: currentYear }
         });
@@ -255,19 +255,19 @@ async function main() {
   };
 
   // user1 requests
-  await createLeaveRequest(user1.emp.id, 'ลาพักผ่อนประจำปี (พักร้อน)', 'Approved', 'พักผ่อนไปเที่ยวเชียงใหม่กับครอบครัว', 3, engMgr.user.id);
-  await createLeaveRequest(user1.emp.id, 'ลาป่วย', 'Approved', 'ไข้หวัดใหญ่ มีใบรับรองแพทย์', 2, engMgr.user.id);
-  await createLeaveRequest(user1.emp.id, 'ลากิจธุระอันจำเป็น', 'Pending', 'ไปติดต่อราชการเรื่องทำบัตรประชาชนใหม่', 1);
+  await createLeaveRequest(user1.emp.id, 'ลาพักผ่อนประจำปี (พักร้อน)', 'APPROVED', 'พักผ่อนไปเที่ยวเชียงใหม่กับครอบครัว', 3, engMgr.user.id);
+  await createLeaveRequest(user1.emp.id, 'ลาป่วย', 'APPROVED', 'ไข้หวัดใหญ่ มีใบรับรองแพทย์', 2, engMgr.user.id);
+  await createLeaveRequest(user1.emp.id, 'ลากิจธุระอันจำเป็น', 'PENDING_VERIFY', 'ไปติดต่อราชการเรื่องทำบัตรประชาชนใหม่', 1);
 
   // user2 requests
-  await createLeaveRequest(user2.emp.id, 'ลาป่วย', 'Rejected', 'ปวดหัวนิดหน่อย ไม่ไปหาหมอ', 1, engMgr.user.id);
-  await createLeaveRequest(user2.emp.id, 'ลาพักผ่อนประจำปี (พักร้อน)', 'Pending', 'พักผ่อนอยู่บ้าน', 2);
+  await createLeaveRequest(user2.emp.id, 'ลาป่วย', 'REJECTED', 'ปวดหัวนิดหน่อย ไม่ไปหาหมอ', 1, engMgr.user.id);
+  await createLeaveRequest(user2.emp.id, 'ลาพักผ่อนประจำปี (พักร้อน)', 'PENDING_VERIFY', 'พักผ่อนอยู่บ้าน', 2);
 
   // user3 requests
-  await createLeaveRequest(user3.emp.id, 'ลาเพื่อคลอดบุตร', 'Waiting CEO', 'เตรียมตัวคลอดลูกเดือนหน้า', 90);
+  await createLeaveRequest(user3.emp.id, 'ลาเพื่อคลอดบุตร', 'PENDING_EXECUTIVE', 'เตรียมตัวคลอดลูกเดือนหน้า', 90);
 
   // engMgr requests
-  await createLeaveRequest(engMgr.emp.id, 'ลาพักผ่อนประจำปี (พักร้อน)', 'Approved', 'ไปเที่ยวต่างประเทศ', 5, ceo.user.id);
+  await createLeaveRequest(engMgr.emp.id, 'ลาพักผ่อนประจำปี (พักร้อน)', 'APPROVED', 'ไปเที่ยวต่างประเทศ', 5, ceo.user.id);
 
   // 8. Notifications
   await prisma.notification.createMany({

@@ -127,17 +127,18 @@ model LeaveApproval {
 }
 
 model LeaveBalance {
-  id            String    @id @default(uuid())
+  id            String                  @id @default(uuid())
   employeeId    String
   leaveTypeId   String
   year          Int
   totalDays     Float
-  usedDays      Float     @default(0)
+  usedDays      Float                   @default(0)
   remainingDays Float
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade, map: "LeaveBalance_employeeId_fkey")
-  leaveType     LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade, map: "LeaveBalance_leaveTypeId_fkey")
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  employee      Employee                @relation(fields: [employeeId], references: [id], onDelete: Cascade, map: "LeaveBalance_employeeId_fkey")
+  leaveType     LeaveType               @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade, map: "LeaveBalance_leaveTypeId_fkey")
+  deductions    LeaveBalanceDeduction[]
 
   @@unique([employeeId, leaveTypeId, year], map: "LeaveBalance_employeeId_leaveTypeId_year_key")
   @@index([leaveTypeId], map: "LeaveBalance_leaveTypeId_fkey")
@@ -145,29 +146,30 @@ model LeaveBalance {
 }
 
 model LeaveRequest {
-  id                  String            @id @default(uuid())
-  requestCode         String?           @unique(map: "LeaveRequest_requestCode_key") @db.VarChar(20)
+  id                  String                  @id @default(uuid())
+  requestCode         String?                 @unique(map: "LeaveRequest_requestCode_key") @db.VarChar(20)
   employeeId          String
   leaveTypeId         String
   startDate           DateTime
   endDate             DateTime
-  startFormat         String            @default("full")
-  endFormat           String            @default("full")
+  startFormat         String                  @default("full")
+  endFormat           String                  @default("full")
   totalDays           Float
-  paidDays            Float             @default(0)
-  unpaidDays          Float             @default(0)
-  reason              String            @db.Text
-  status              String            @default("Pending")
-  isViewedByHr        Boolean           @default(false)
+  paidDays            Float                   @default(0)
+  unpaidDays          Float                   @default(0)
+  reason              String                  @db.Text
+  status              String                  @default("Pending")
+  isViewedByHr        Boolean                 @default(false)
   currentHrReviewerId String?
   hrReviewStartedAt   DateTime?
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
   attachments         LeaveAttachment[]
   approvals           LeaveApproval[]
   days                LeaveRequestDay[]
-  employee            Employee          @relation(fields: [employeeId], references: [id], onDelete: Cascade, map: "LeaveRequest_employeeId_fkey")
-  leaveType           LeaveType         @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade, map: "LeaveRequest_leaveTypeId_fkey")
+  deductions          LeaveBalanceDeduction[]
+  employee            Employee                @relation(fields: [employeeId], references: [id], onDelete: Cascade, map: "LeaveRequest_employeeId_fkey")
+  leaveType           LeaveType               @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade, map: "LeaveRequest_leaveTypeId_fkey")
 
   @@index([employeeId], map: "LeaveRequest_employeeId_fkey")
   @@index([leaveTypeId], map: "LeaveRequest_leaveTypeId_fkey")
@@ -193,6 +195,25 @@ model LeaveRequestDay {
   @@unique([leaveRequestId, date], map: "LeaveRequestDay_leaveRequestId_date_key")
   @@index([leaveRequestId], map: "LeaveRequestDay_leaveRequestId_fkey")
   @@map("leaverequestday")
+}
+
+// How many days an APPROVED leave took from each year's balance. A leave that
+// crosses New Year uses the start year's balance first and the next year's for
+// the rest, so a cancellation must give each year back exactly what it took.
+// Leaves approved before this table existed have no rows (refund falls back to
+// the start-year balance). See leave-balance.util.ts.
+model LeaveBalanceDeduction {
+  id             String       @id @default(uuid())
+  leaveRequestId String
+  leaveBalanceId String
+  days           Float
+  createdAt      DateTime     @default(now())
+  leaveRequest   LeaveRequest @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade, map: "LeaveBalanceDeduction_leaveRequestId_fkey")
+  leaveBalance   LeaveBalance @relation(fields: [leaveBalanceId], references: [id], onDelete: Cascade, map: "LeaveBalanceDeduction_leaveBalanceId_fkey")
+
+  @@unique([leaveRequestId, leaveBalanceId], map: "LeaveBalanceDeduction_leaveRequestId_leaveBalanceId_key")
+  @@index([leaveBalanceId], map: "LeaveBalanceDeduction_leaveBalanceId_fkey")
+  @@map("leavebalancededuction")
 }
 
 model LeaveType {

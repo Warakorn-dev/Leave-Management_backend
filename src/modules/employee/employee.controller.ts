@@ -14,6 +14,7 @@ import { EmployeeMutationService } from './services/employee-mutation.service';
 import { EmployeeQueryService } from './services/employee-query.service';
 import {
   CreateLeaveRequestDto,
+  PreviewLeaveRequestDto,
   UpdateLeaveRequestDto,
 } from './dto/employee.dto';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -41,6 +42,18 @@ export class EmployeeController {
     @Body() dto: CreateLeaveRequestDto,
   ) {
     return this.employeeMutationService.createLeaveRequest(user.id, dto);
+  }
+
+  @Get('preview')
+  @ApiOperation({
+    summary:
+      'Dry run of a new leave request: days it would use, or why it would be refused (creates nothing)',
+  })
+  previewLeaveRequest(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query() query: PreviewLeaveRequestDto,
+  ) {
+    return this.employeeMutationService.previewLeaveRequest(user.id, query);
   }
 
   @Get('dashboard')

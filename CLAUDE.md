@@ -65,7 +65,7 @@ Guard: `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles(...)` ระดับ cl
 | Prefix | Roles | Endpoints หลัก |
 |---|---|---|
 | `/auth` | public / JWT | `GET config`, `GET captcha`, `POST captcha/verify`, `POST login` (20/นาที), `POST logout`, `POST refresh` (ใช้ refresh token เป็น Bearer), `POST forgot-password` (5/นาที), `POST reset-password`, `PUT profile`, `GET password-status` |
-| `/leave` | Employee, Manager, HR, CEO | `POST /` ยื่นลา, `PUT /:id`, `DELETE /:id` (ยกเลิก), `GET dashboard`, `types`, `holidays`, `day-availability`, `history`, `all-leaves`, `department`, `me`, `balance`, `PATCH me/avatar` |
+| `/leave` | Employee, Manager, HR, CEO | `POST /` ยื่นลา, `PUT /:id`, `DELETE /:id` (ยกเลิก), `GET dashboard`, `types`, `holidays`, `day-availability`, `preview` (ซ้อมยื่นลา: คืน `{ok,totalDays,message}` ไม่สร้างข้อมูล), `history`, `all-leaves`, `department`, `me`, `balance`, `PATCH me/avatar` |
 | `/hr` | HR (บางอันเปิด CEO อ่าน) | CRUD `departments`, `positions`, `leave-types`, `holidays`, `employees` (+ `/:id/status`, `/:id/initialize-leave-balances`, `/:id/reset-leave-balances`), `GET roles`, `GET leaves`, `GET leaves/pending-verify`, `PUT leaves/:id/verify` (`{action:'Approve'|'Reject', comment}`), `PATCH leaves/:id/view` (lock), `PUT leave-balances/:id`, `GET dashboard`, `GET leave-summary` |
 | `/manager` | Manager, HR | `GET dashboard`, `pending`, `history`, `PUT approve/:id`, `PUT reject/:id` |
 | `/ceo` | CEO | `GET dashboard`, `report/company`, `report/stats`, `report/department?id=`, `pending`, `employees`, `PUT approve/:id`, `PUT reject/:id` |
@@ -82,6 +82,7 @@ Guard: `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles(...)` ระดับ cl
 - `LeaveBalance` unique (employeeId, leaveTypeId, year): `totalDays`, `usedDays`, `remainingDays` (**remainingDays คือค่าจริง** — HR แก้มือได้ อย่าคำนวณใหม่จาก total-used)
 - `LeaveRequest`: `requestCode` = `L-{typeCode}-{seq 5 หลัก}-{ปี พ.ศ.}`, `startFormat/endFormat` (`full|morning|afternoon`), `totalDays`, `paidDays`, `unpaidDays`, `status`, HR lock (`currentHrReviewerId`, `hrReviewStartedAt`, `isViewedByHr`)
 - `LeaveRequestDay`: แยกรายวัน (`portion` = full/morning/afternoon) ไม่รวมวันหยุด/เสาร์อาทิตย์
+- `LeaveBalanceDeduction`: ใบลาที่ APPROVED หักจาก balance ปีไหนกี่วัน (ใบลาข้ามปีหัก 2 ปี) ใช้คืนโควตาตอนยกเลิก; ใบที่อนุมัติก่อนมีตารางนี้ไม่มีแถว → คืนให้ปีของ startDate
 - `LeaveApproval` (log ทุกการเปลี่ยนสถานะ), `LeaveAttachment` (`filePath` = **base64 data URL** เก็บใน LongText)
 - อื่น ๆ: `PublicHoliday`, `Notification` (`redirectUrl`, `type`), `Announcement`, `AuditLog`, `Captcha`, `AdminSetting` (key/value), `HrSetting`
 - ชื่อตารางจริงเป็น lowercase ผ่าน `@@map` (เช่น `leaverequest`)
@@ -111,6 +112,7 @@ Guard: `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles(...)` ระดับ cl
 - การปฏิเสธต้องมีเหตุผล (`comment`)
 - ทุกขั้นใช้ `updateMany({ where: { id, status: <สถานะที่คาด> } })` ใน transaction กันกดซ้ำ — รักษา pattern นี้ไว้
 - ยกเลิกใบที่ผ่าน HR แล้ว → `PENDING_CANCELLATION` → HR อนุมัติ = `CANCELLED` + คืนโควตา / ปฏิเสธ = กลับสถานะล่าสุดใน LeaveApproval
+- **ลาข้ามปี** (`employee/leave-balance.util.ts`, ใช้ร่วมกันใน manager/CEO/HR cancel): ตรวจและหักจาก balance ของ**ปีที่ startDate** ก่อน ส่วนเกินหักจากปีถัดไป (ข้ามได้ไม่เกิน 1 ปี) เช่น เหลือ 4 วัน ลา 6 วัน → ปีเก่า 4 + ปีใหม่ 2; ถ้ายังไม่มี balance ปีใหม่จะสร้างให้ตอน**อนุมัติ** (หลังหักปีเก่าแล้ว) ด้วย `initialBalanceTotal` (กฎเดียวกับ HR initialize: พักร้อนยกยอดได้ รวมไม่เกิน 12) ตอนยื่นใช้ยอดเริ่มต้นสมมติตรวจว่าพอ ไม่เขียน DB
 
 **Auth & ความปลอดภัย**
 - Login ต้องมี captcha (`captchaId`, `captchaInput`), lockout ตาม `AdminSetting` (`MAX_FAILED_LOGINS`=5, `LOCKOUT_DURATION_MINUTES`=15); ผู้ใช้ไม่มีจริง/รหัสผิด/ถูกล็อก ตอบข้อความเดียวกัน (กัน enumeration)
